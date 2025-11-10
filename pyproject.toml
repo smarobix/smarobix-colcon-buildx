@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "colcon-buildx"
+dynamic = ["version"]
+description = "Colcon extension for cross-compilation to embedded ARM64 boards"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "Apache License 2.0"}
+authors = [
+    {name = "Smarobix", email = "info@smarobox.de"}
+]
+keywords = ["colcon", "cross-compilation", "ros2", "embedded", "docker", "arm64"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Plugins",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Build Tools",
+]
+
+dependencies = [
+    "colcon-core>=0.7.1",
+    "colcon-cmake>=0.2.0",
+    "PyYAML>=5.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "flake8",
+]
+
+[project.urls]
+Homepage = "https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile"
+Repository = "https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile"
+Issues = "https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "colcon_buildx.__version__"}

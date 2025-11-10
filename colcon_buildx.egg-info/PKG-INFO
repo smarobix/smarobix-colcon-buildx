@@ -1,3 +1,34 @@
+Metadata-Version: 2.4
+Name: colcon-buildx
+Version: 0.1.0
+Summary: Colcon extension for cross-compilation to embedded ARM64 boards
+Home-page: https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile
+Author: Smarobix
+Author-email: Smarobix <info@smarobox.de>
+Maintainer: Smarobix
+Maintainer-email: info@smarobox.de
+License: Apache License 2.0
+Project-URL: Homepage, https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile
+Project-URL: Repository, https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile
+Project-URL: Issues, https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/issues
+Keywords: colcon,cross-compilation,ros2,embedded,docker,arm64
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Plugins
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: POSIX
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Software Development :: Build Tools
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: colcon-core>=0.7.1
+Requires-Dist: colcon-cmake>=0.2.0
+Requires-Dist: PyYAML>=5.1
+Provides-Extra: test
+Requires-Dist: pytest>=6.0; extra == "test"
+Requires-Dist: pytest-cov; extra == "test"
+Requires-Dist: flake8; extra == "test"
+
 # Kria Build Tools
 
 Cross-compilation tools for ROS 2 targeting embedded ARM64 boards (Xilinx Kria, Raspberry Pi, NVIDIA Jetson, etc.).

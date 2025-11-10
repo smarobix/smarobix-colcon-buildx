@@ -1,0 +1,183 @@
+"""Cross-compilation build verb for colcon."""
+
+import os
+from pathlib import Path
+
+from colcon_core.plugin_system import satisfies_version
+from colcon_core.verb import VerbExtensionPoint
+from colcon_core.logging import colcon_logger
+
+logger = colcon_logger.getChild(__name__)
+
+
+class BuildxVerb(VerbExtensionPoint):
+    """Cross-compile ROS 2 workspace for embedded ARM64 boards."""
+
+    def __init__(self):
+        super().__init__()
+        satisfies_version(VerbExtensionPoint.EXTENSION_POINT_VERSION, '^1.0')
+
+    def add_arguments(self, *, parser):
+        """Add command line arguments for cross-compilation."""
+        # Build method
+        parser.add_argument(
+            '--method',
+            choices=['sysroot', 'docker'],
+            default='docker',
+            help='Build method: sysroot (SSHFS mount) or docker (container-based). Default: docker'
+        )
+
+        # Common arguments
+        parser.add_argument(
+            '--config',
+            type=str,
+            help='Configuration file (default: search for .buildx.conf or .buildx.yml in workspace)'
+        )
+        parser.add_argument(
+            '--build-base',
+            default='cross_build',
+            help='Build directory for cross-compiled artifacts (default: cross_build)'
+        )
+        parser.add_argument(
+            '--install-base',
+            default='cross_install',
+            help='Install directory for cross-compiled artifacts (default: cross_install)'
+        )
+
+        # Sysroot-specific arguments
+        sysroot_group = parser.add_argument_group('SSHFS Sysroot Options (--method sysroot)')
+        sysroot_group.add_argument(
+            '--sysroot-host',
+            help='Hostname or IP of the target board for sysroot access (e.g., kria-vision-home)'
+        )
+        sysroot_group.add_argument(
+            '--sysroot-mount',
+            default=os.path.expanduser('~/mnt/board-sysroot'),
+            help='Local mount point for board sysroot (default: ~/mnt/board-sysroot)'
+        )
+        sysroot_group.add_argument(
+            '--toolchain',
+            help='Path to CMake toolchain file (required for sysroot method)'
+        )
+        sysroot_group.add_argument(
+            '--no-mount',
+            action='store_true',
+            help='Skip SSHFS mounting (assume sysroot already mounted)'
+        )
+
+        # Docker-specific arguments
+        docker_group = parser.add_argument_group('Docker Options (--method docker)')
+        docker_group.add_argument(
+            '--docker-image',
+            help='Docker image for cross-compilation (e.g., git.smarobox.de:5050/.../jazzy-base)'
+        )
+        docker_group.add_argument(
+            '--docker-platform',
+            default='linux/arm64',
+            help='Target platform for Docker (default: linux/arm64)'
+        )
+
+        # Deployment
+        deploy_group = parser.add_argument_group('Deployment Options')
+        deploy_group.add_argument(
+            '--deploy',
+            action='store_true',
+            help='Deploy build results to target board after successful build'
+        )
+        deploy_group.add_argument(
+            '--deploy-target',
+            help='Deployment target in format user@host:/path/to/install (e.g., ubuntu@kria-vision-home:~/ros2_ws/install/)'
+        )
+
+        # Pass-through colcon args
+        parser.add_argument(
+            'colcon_args',
+            nargs='*',
+            help='Additional arguments to pass to colcon build (e.g., --packages-select my_package)'
+        )
+
+    def main(self, *, context):
+        """Execute the cross-compilation build."""
+        from colcon_buildx.config import load_config
+
+        args = context.args
+
+        # Load configuration file if exists
+        config = load_config(args.config)
+
+        # Merge config with CLI args (CLI takes precedence)
+        if config:
+            logger.info(f"📝 Loaded configuration from file")
+            for key, value in config.items():
+                if not hasattr(args, key) or getattr(args, key) is None:
+                    setattr(args, key, value)
+
+        logger.info(f"🔧 Cross-compilation method: {args.method}")
+
+        try:
+            if args.method == 'sysroot':
+                # SSHFS-based cross-compilation
+                if not args.toolchain:
+                    logger.error("❌ --toolchain is required for sysroot method")
+                    return 1
+                if not args.sysroot_host:
+                    logger.error("❌ --sysroot-host is required for sysroot method")
+                    return 1
+
+                from colcon_buildx.sysroot import SysrootBuilder
+                builder = SysrootBuilder(
+                    sysroot_host=args.sysroot_host,
+                    sysroot_mount=args.sysroot_mount,
+                    toolchain_file=args.toolchain,
+                    build_base=args.build_base,
+                    install_base=args.install_base,
+                    no_mount=args.no_mount
+                )
+
+            elif args.method == 'docker':
+                # Docker-based cross-compilation
+                if not args.docker_image:
+                    logger.error("❌ --docker-image is required for docker method")
+                    logger.info("💡 Example: --docker-image git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base")
+                    return 1
+
+                from colcon_buildx.docker import DockerBuilder
+                builder = DockerBuilder(
+                    image=args.docker_image,
+                    platform=args.docker_platform,
+                    build_base=args.build_base,
+                    install_base=args.install_base
+                )
+
+            # Execute the build
+            logger.info("🚀 Starting cross-compilation build...")
+            result = builder.build(extra_args=args.colcon_args or [])
+            if result != 0:
+                logger.error(f"❌ Build failed with exit code {result}")
+                return result
+
+            logger.info("✅ Cross-compilation completed successfully")
+
+            # Optional deployment
+            if args.deploy:
+                if not args.deploy_target:
+                    logger.error("❌ --deploy-target is required when --deploy is used")
+                    logger.info("💡 Example: --deploy-target ubuntu@kria-vision-home:~/ros2_ws/install/")
+                    return 1
+
+                from colcon_buildx.deployment import deploy
+                logger.info(f"🚀 Deploying to {args.deploy_target}...")
+                deploy_result = deploy(args.install_base, args.deploy_target)
+                if deploy_result != 0:
+                    logger.error("❌ Deployment failed")
+                    return deploy_result
+
+                logger.info("✅ Deployment completed successfully")
+
+            return 0
+
+        except Exception as e:
+            logger.error(f"❌ Error during cross-compilation: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return 1
