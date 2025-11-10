@@ -6,21 +6,7 @@ This build tool can be used with any ROS 2 workspace to cross-compile for Kria b
 
 ## Quick Install (Recommended)
 
-### Option 1: Install from Repository
-
-```bash
-# Clone to a tools directory
-mkdir -p ~/tools
-git clone https://git.smarobox.de/smarobix/kria-build-tools.git ~/tools/kria-build-tools
-
-# Add to PATH (add to ~/.bashrc or ~/.zshrc for persistence)
-export PATH="$HOME/tools/kria-build-tools/bin:$PATH"
-
-# Verify installation
-kria-build --help
-```
-
-### Option 2: One-Line Install via curl
+### Option 1: One-Line Install via curl
 
 ```bash
 curl -fsSL https://git.smarobox.de/smarobix/kria-build-tools/raw/main/install.sh | bash
@@ -31,17 +17,18 @@ This will:
 - Make it executable
 - Add to PATH if needed
 
-### Option 3: Manual Install
+### Option 2: Install from Repository
 
 ```bash
-# Download the script
-curl -fsSL https://git.smarobox.de/smarobix/kria-build-tools/raw/main/bin/kria-build -o kria-build
-chmod +x kria-build
+# Clone to a tools directory
+mkdir -p ~/tools
+git clone git@git.smarobox.de:smarobix/automatica-2025/kria-ros-buildx-tools.git ~/tools/kria-build-tools
 
-# Move to a directory in your PATH
-sudo mv kria-build /usr/local/bin/
-# OR
-mv kria-build ~/.local/bin/
+# Add to PATH (add to ~/.bashrc or ~/.zshrc for persistence)
+export PATH="$HOME/tools/kria-build-tools/bin:$PATH"
+
+# Verify installation
+kria-build --help
 ```
 
 ## Prerequisites
@@ -103,6 +90,12 @@ Error response from daemon: image with reference ... was found but does not matc
 
 export GITLAB_TOKEN="glpat-xxxxxxxxxxxxxxxxxxxx"
 echo $GITLAB_TOKEN | docker login git.smarobox.de:5050 -u <your-username> --password-stdin
+```
+
+It is also possible to just do:
+
+```bash
+docker login git.smarobox.de:5050
 ```
 
 ### 4. Pull the Docker Image
