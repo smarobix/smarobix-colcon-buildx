@@ -4,13 +4,13 @@ A workspace-agnostic build tool for cross-compiling ROS 2 packages for Xilinx Kr
 
 ## Features
 
-- ✅ **Workspace Auto-Detection** - Run from anywhere in your ROS 2 workspace
-- ✅ **Persistent Build Caching** - Incremental builds using Docker volumes (2-5min rebuilds vs 10-15min)
-- ✅ **Platform Detection** - Auto-detects x86_64/ARM64 and sets up emulation if needed
-- ✅ **Flexible Deployment** - Deploy to any remote target via rsync
-- ✅ **Dry Run Mode** - Test builds locally before deploying
-- ✅ **Configurable** - Per-workspace configuration via `.kria-build.conf`
-- ✅ **Pre-built Images** - Uses GitLab Container Registry for fast setup
+- **Workspace Auto-Detection** - Run from anywhere in your ROS 2 workspace
+- **Persistent Build Caching** - Incremental builds using Docker volumes (2-5min rebuilds vs 10-15min)
+- **Platform Detection** - Auto-detects x86_64/ARM64 and sets up emulation if needed
+- **Flexible Deployment** - Deploy to any remote target via rsync
+- **Dry Run Mode** - Test builds locally before deploying
+- **Configurable** - Per-workspace configuration via `.kria-build.conf`
+- **Pre-built Images** - Uses GitLab Container Registry for fast setup
 
 ## Quick Start
 
@@ -18,17 +18,7 @@ A workspace-agnostic build tool for cross-compiling ROS 2 packages for Xilinx Kr
 
 **One-line install:**
 ```bash
-curl -fsSL https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/raw/main/install.sh | bash
-```
-
-**Manual install:**
-```bash
-# Download the tool
-curl -fsSL https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/raw/main/bin/kria-build -o ~/.local/bin/kria-build
-chmod +x ~/.local/bin/kria-build
-
-# Add to PATH (if not already)
-export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
 ```
 
 ### Prerequisites
@@ -83,20 +73,12 @@ Install globally and use with any ROS 2 workspace:
 
 ```bash
 # Install
-curl -fsSL https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/raw/main/install.sh | bash
+curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
 
 # Use from any workspace
 cd ~/workspace_A && kria-build --dry-run
 cd ~/workspace_B && kria-build --sync-to kria:~/install/
 ```
-
-**Pros:**
-- Single installation for all workspaces
-- Easy to update
-- Clean separation of tool and workspace
-
-**Cons:**
-- Requires adding to PATH
 
 ### Method 2: Per-Workspace Install
 
@@ -104,58 +86,11 @@ Copy the script into each workspace:
 
 ```bash
 cd ~/my_ros2_workspace
-curl -fsSL https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/raw/main/bin/kria-build -o kria-build
+curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/bin/kria-build -o kria-build
 chmod +x kria-build
 
 ./kria-build --dry-run
 ```
-
-**Pros:**
-- Self-contained workspace
-- Easy to version control with your project
-- No PATH setup needed
-
-**Cons:**
-- Need to update each workspace separately
-
-### Method 3: Git Submodule
-
-Add as a submodule to your workspace repository:
-
-```bash
-cd ~/my_ros2_workspace
-git submodule add https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile.git tools/kria-build
-tools/kria-build/bin/kria-build --dry-run
-```
-
-**Pros:**
-- Versioned with your workspace
-- Easy to share exact tool version with team
-- Updates via git submodule update
-
-**Cons:**
-- More complex Git workflow
-
-### Method 4: Dedicated Tool Repository
-
-Clone to a tools directory and add to PATH:
-
-```bash
-mkdir -p ~/tools
-git clone https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile.git ~/tools/kria-build
-export PATH="$HOME/tools/kria-build/bin:$PATH"  # Add to ~/.bashrc
-
-# Use from anywhere
-kria-build --dry-run
-```
-
-**Pros:**
-- Easy to update (git pull)
-- Access to all documentation
-- Single source of truth
-
-**Cons:**
-- Requires PATH setup
 
 ## Configuration
 
@@ -179,38 +114,6 @@ See `.kria-build.conf.example` for all options.
 | ARM64 (Linux/RPi) | ✅ | No | Native ARM64, no emulation |
 | ARM64 (Kria board) | ✅ | No | Can build natively on device |
 
-## Common Workflows
-
-### Development Workflow
-
-```bash
-# 1. Make changes to your code
-vim src/my_package/src/my_node.cpp
-
-# 2. Test build locally
-kria-build --dry-run
-
-# 3. Deploy to Kria
-kria-build --sync-to kria:~/ros2_ws/install/
-
-# 4. Test on Kria
-ssh kria
-source ~/ros2_ws/install/setup.bash
-ros2 launch my_package my_launch.py
-```
-
-### Multi-Board Deployment
-
-```bash
-# Build once
-kria-build --dry-run
-
-# Deploy to multiple boards
-for board in kria-1 kria-2 kria-3; do
-    rsync -avz kria_products/install/ $board:~/ros2_ws/install/
-done
-```
-
 ### CI/CD Integration
 
 ```yaml
@@ -222,27 +125,9 @@ build:
     - rsync -avz kria_products/install/ ${DEPLOY_TARGET}
 ```
 
-## Repository Structure
-
-```
-kria_ros_cross_compile/
-├── bin/
-│   └── kria-build              # Main executable
-├── install.sh                   # One-line installer
-├── .kria-build.conf.example    # Example configuration
-├── README.md                    # This file
-├── INSTALLATION.md             # Detailed installation guide
-├── README_USAGE.md             # Usage guide
-├── BUILD_OPTIMIZATION.md       # Performance optimization
-└── CHANGELOG.md                # Version history
-```
-
 ## Documentation
 
 - **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide with platform-specific instructions
-- **[README_USAGE.md](README_USAGE.md)** - Detailed usage examples and workflows
-- **[BUILD_OPTIMIZATION.md](BUILD_OPTIMIZATION.md)** - Performance tips and cache optimization
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and migration guides
 
 ## Troubleshooting
 
@@ -302,16 +187,3 @@ kria-build --clean --rebuild-container --dry-run
 docker rm -f ros2-kria-builder
 docker volume rm ros2_kria_build ros2_kria_install
 ```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
-
-## License
-
-Copyright 2024-2025 Smarobix. Proprietary.
-
-## Support
-
-- Issues: https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/issues
-- Documentation: https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile

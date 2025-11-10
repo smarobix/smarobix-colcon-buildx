@@ -6,7 +6,7 @@ set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
 SCRIPT_NAME="kria-build"
-REPO_URL="https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/raw/main"
+REPO_URL="git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git"
 
 echo "🚀 Installing Kria Build Tool..."
 
