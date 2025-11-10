@@ -1,0 +1,269 @@
+#!/bin/bash
+set -e
+
+# Kria Build Tool - Workspace-agnostic ROS 2 cross-compilation for Kria boards
+# Version: 1.0.0
+
+# Default configuration
+CONTAINER_NAME=ros2-kria-builder
+IMAGE_NAME="git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base"
+SYNC_TARGET=""
+DRY_RUN=false
+ROS_DISTRO=jazzy  # Auto-detected from image name
+
+# Find workspace root by looking for src/ directory
+find_workspace_root() {
+    local current_dir="$PWD"
+
+    # Search up to 5 levels up
+    for i in {1..5}; do
+        if [ -d "$current_dir/src" ]; then
+            echo "$current_dir"
+            return 0
+        fi
+        current_dir="$(dirname "$current_dir")"
+        if [ "$current_dir" = "/" ]; then
+            break
+        fi
+    done
+
+    return 1
+}
+
+# Load workspace configuration if exists
+load_config() {
+    local config_file="$1/.kria-build.conf"
+    if [ -f "$config_file" ]; then
+        echo "📝 Loading configuration from .kria-build.conf"
+        source "$config_file"
+    fi
+}
+
+# Check if running on x86_64 and QEMU is needed
+check_qemu() {
+    local arch=$(uname -m)
+
+    if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
+        # Check if QEMU is already enabled
+        if [ ! -f /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
+            echo ""
+            echo "⚠️  WARNING: You're running on x86_64 but ARM64 emulation is not enabled!"
+            echo ""
+            echo "To enable ARM64 emulation (QEMU), run:"
+            echo ""
+            echo "    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes"
+            echo ""
+            echo "Without this, Docker will fail to run ARM64 images."
+            echo ""
+            read -p "Do you want to enable it now? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo "🔧 Enabling ARM64 emulation..."
+                docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+                echo "✅ ARM64 emulation enabled!"
+            else
+                echo "⚠️  Proceeding without emulation - builds will likely fail!"
+                sleep 2
+            fi
+        fi
+    elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+        echo "✅ Running on ARM64 - no emulation needed"
+    fi
+}
+
+# Parse arguments
+COLCON_ARGS=""
+REBUILD_CONTAINER=false
+SKIP_QEMU_CHECK=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --rebuild-container)
+            REBUILD_CONTAINER=true
+            shift
+            ;;
+        --clean)
+            if [ -n "$WORKSPACE_ROOT" ]; then
+                echo "🧹 Cleaning build artifacts..."
+                docker exec $CONTAINER_NAME rm -rf /opt/ros_ws/build /opt/ros_ws/install 2>/dev/null || true
+            fi
+            shift
+            ;;
+        --sync-to)
+            SYNC_TARGET="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --image)
+            IMAGE_NAME="$2"
+            # Auto-detect ROS distro from image name
+            if [[ "$IMAGE_NAME" == *"humble"* ]]; then
+                ROS_DISTRO=humble
+            elif [[ "$IMAGE_NAME" == *"jazzy"* ]]; then
+                ROS_DISTRO=jazzy
+            fi
+            shift 2
+            ;;
+        --skip-qemu-check)
+            SKIP_QEMU_CHECK=true
+            shift
+            ;;
+        --version)
+            echo "kria-build version 1.0.0"
+            exit 0
+            ;;
+        --help)
+            cat << EOF
+Kria Build Tool - Cross-compile ROS 2 workspaces for Kria boards
+
+Usage: kria-build [OPTIONS] [COLCON_ARGS]
+
+Options:
+  --rebuild-container    Force rebuild of the container
+  --clean                Clean build artifacts before building
+  --sync-to TARGET       Sync install folder to TARGET (e.g., kria-board:~/ros2_ws/install/)
+  --dry-run              Build only, do not sync to remote
+  --image IMAGE          Use custom Docker image (default: registry jazzy-base)
+  --skip-qemu-check      Skip ARM64 emulation check (not recommended)
+  --version              Show version information
+  --help                 Show this help message
+
+Configuration:
+  Create .kria-build.conf in your workspace root with:
+    KRIA_IMAGE=<docker-image>
+    KRIA_DEFAULT_TARGET=<rsync-target>
+    KRIA_CONTAINER_NAME=<container-name>
+
+Examples:
+  kria-build --dry-run
+  kria-build --sync-to kria-robotics:~/ros2_ws/install/
+  kria-build --sync-to user@192.168.1.100:~/install/ --packages-select my_package
+  kria-build --clean --dry-run
+
+Workspace Detection:
+  The tool automatically finds your ROS 2 workspace by searching for src/ directory
+  starting from the current directory and going up.
+
+Prerequisites (x86_64 hosts):
+  1. Enable ARM64 emulation:
+     docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+  2. Pull the Docker image:
+     docker pull --platform linux/arm64 git.smarobox.de:5050/.../jazzy-base
+
+For more information, see:
+  https://git.smarobox.de/smarobix/kria-build-tools
+EOF
+            exit 0
+            ;;
+        *)
+            COLCON_ARGS="$COLCON_ARGS $1"
+            shift
+            ;;
+    esac
+done
+
+# Find workspace
+echo "🔍 Searching for ROS 2 workspace..."
+if ! WORKSPACE_ROOT=$(find_workspace_root); then
+    echo "❌ Error: Could not find ROS 2 workspace (no src/ directory found)"
+    echo "   Please run this command from within a ROS 2 workspace"
+    echo "   or ensure your workspace has a src/ directory"
+    exit 1
+fi
+
+echo "✅ Found workspace at: $WORKSPACE_ROOT"
+
+# Load workspace-specific config
+load_config "$WORKSPACE_ROOT"
+
+# Check QEMU if needed (unless skipped)
+if [ "$SKIP_QEMU_CHECK" = "false" ]; then
+    check_qemu
+fi
+
+# Display configuration
+echo ""
+echo "🔧 Build Configuration:"
+echo "   Workspace: $WORKSPACE_ROOT"
+echo "   Container: $CONTAINER_NAME"
+echo "   Image: $IMAGE_NAME"
+echo "   ROS Distro: $ROS_DISTRO (from image)"
+echo "   Platform: $(uname -m)"
+echo "   Dry Run: $DRY_RUN"
+[ -n "$SYNC_TARGET" ] && echo "   Sync Target: $SYNC_TARGET"
+[ -n "$COLCON_ARGS" ] && echo "   Colcon Args: $COLCON_ARGS"
+echo ""
+
+# Verify workspace structure
+if [ ! -d "$WORKSPACE_ROOT/src" ]; then
+    echo "❌ Error: Source directory not found at $WORKSPACE_ROOT/src"
+    exit 1
+fi
+
+# Check if container exists and is running
+if ! docker ps -q -f name=$CONTAINER_NAME | grep -q .; then
+    if docker ps -a -q -f name=$CONTAINER_NAME | grep -q .; then
+        if [ "$REBUILD_CONTAINER" = "true" ]; then
+            echo "🔄 Rebuilding container..."
+            docker rm -f $CONTAINER_NAME
+        else
+            echo "🚀 Starting existing container..."
+            docker start $CONTAINER_NAME
+        fi
+    fi
+
+    if ! docker ps -q -f name=$CONTAINER_NAME | grep -q .; then
+        echo "🏗️  Creating new persistent build container..."
+        echo "   Mounting source from: $WORKSPACE_ROOT/src"
+        docker run -d \
+            --name $CONTAINER_NAME \
+            --platform linux/arm64 \
+            -v "$WORKSPACE_ROOT/src:/opt/ros_ws/src:ro" \
+            -v "ros2_kria_build:/opt/ros_ws/build" \
+            -v "ros2_kria_install:/opt/ros_ws/install" \
+            -w /opt/ros_ws \
+            $IMAGE_NAME \
+            tail -f /dev/null
+    fi
+fi
+
+echo "📦 Building in persistent container..."
+if [ -n "$COLCON_ARGS" ]; then
+    echo "   Using colcon args: $COLCON_ARGS"
+fi
+
+# Build in the persistent container
+docker exec $CONTAINER_NAME bash -c "
+    . /opt/ros/$ROS_DISTRO/setup.sh && \
+    if [ -n '$COLCON_ARGS' ]; then \
+        echo 'Building with colcon args: $COLCON_ARGS'; \
+        colcon build --merge-install $COLCON_ARGS; \
+    else \
+        colcon build --merge-install; \
+    fi
+"
+
+echo "📤 Extracting install directory..."
+# Create temporary directory for extraction in workspace root
+PRODUCTS_DIR="$WORKSPACE_ROOT/kria_products"
+mkdir -p "$PRODUCTS_DIR"
+docker cp $CONTAINER_NAME:/opt/ros_ws/install "$PRODUCTS_DIR/"
+
+# Sync to remote target if specified and not in dry-run mode
+if [ "$DRY_RUN" = "true" ]; then
+    echo "🏗️  Dry run complete - build artifacts in $PRODUCTS_DIR/install/"
+    echo "💡 Use without --dry-run to sync to remote target"
+elif [ -n "$SYNC_TARGET" ]; then
+    echo "🚀 Syncing to $SYNC_TARGET..."
+    rsync -avz --delete "$PRODUCTS_DIR/install/" "$SYNC_TARGET"
+    echo "✅ Done. Install folder synced to $SYNC_TARGET"
+else
+    echo "⚠️  No sync target specified. Build artifacts available in $PRODUCTS_DIR/install/"
+    echo "💡 Use --sync-to <target> to sync to remote, or see --help for more options"
+fi
+
+echo "💡 Next builds will be incremental unless you use --clean or --rebuild-container"

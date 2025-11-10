@@ -1,0 +1,16 @@
+# Kria Build Tool Configuration
+# Copy this file to your workspace root as .kria-build.conf
+
+# Docker image to use for building
+# Auto-detected ROS distribution from image name (jazzy, humble, etc.)
+KRIA_IMAGE=git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+
+# Default sync target (can be overridden with --sync-to)
+# Format: user@host:/path/to/install
+KRIA_DEFAULT_TARGET=kria-robotics:~/ros2_ws/install/
+
+# Container name (useful if building multiple workspaces simultaneously)
+KRIA_CONTAINER_NAME=ros2-kria-builder
+
+# Additional colcon arguments (applied to all builds)
+# KRIA_COLCON_ARGS="--cmake-args -DCMAKE_BUILD_TYPE=Release"
