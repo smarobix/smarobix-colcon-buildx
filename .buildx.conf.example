@@ -1,0 +1,38 @@
+# Colcon Buildx Configuration Example
+# Copy this file to your workspace root as .buildx.conf
+
+# Cross-compilation method: sysroot or docker
+method = docker
+
+# =============================================================================
+# Docker Method Configuration
+# =============================================================================
+docker_image = git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+docker_platform = linux/arm64
+
+# =============================================================================
+# SSHFS Sysroot Method Configuration (alternative to Docker)
+# =============================================================================
+# method = sysroot
+# sysroot_host = kria-vision-home
+# sysroot_mount = ~/mnt/kria-sysroot
+# toolchain = toolchainfile.cmake
+# no_mount = false
+
+# =============================================================================
+# Build Configuration
+# =============================================================================
+build_base = cross_build
+install_base = cross_install
+
+# =============================================================================
+# Deployment Configuration
+# =============================================================================
+deploy = false
+deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
+
+# =============================================================================
+# Additional Colcon Arguments (optional)
+# =============================================================================
+# Pass extra arguments to colcon build
+# colcon_args = --packages-select my_package --cmake-args -DCMAKE_BUILD_TYPE=Release
