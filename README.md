@@ -2,54 +2,31 @@
 
 Cross-compilation tools for ROS 2 targeting embedded ARM64 boards (Xilinx Kria, Raspberry Pi, NVIDIA Jetson, etc.).
 
-## Two Ways to Use
+## Overview
 
-### 1. Colcon Extension (Recommended for ROS 2 Development) ⭐
+`colcon-buildx` is a colcon extension that adds cross-compilation support for embedded ARM64 boards. It provides native colcon integration with support for Docker-based and SSHFS-based cross-compilation.
 
-Native colcon integration with `colcon buildx` command.
+**Features:**
+- **Native Colcon Integration** - `colcon buildx` command with full colcon argument support
+- **Two Build Methods** - Docker (containerized) and SSHFS (sysroot mounting - untested)
+- **Configuration Files** - `.buildx.conf` or `.buildx.yml` for project-specific settings
+- **Automatic Deployment** - Optional rsync deployment to target boards
+- **Generic** - Works with any ARM64 board with a Docker image
 
-```bash
-# Install
-pip install git+ssh://git@git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile.git
+## Installation
 
-# Use
-cd ~/ros2_workspace
-colcon buildx --method docker --docker-image git.smarobox.de:5050/.../jazzy-base
-```
-
-**See [COLCON_EXTENSION_GUIDE.md](COLCON_EXTENSION_GUIDE.md) for full documentation.**
-
-### 2. Standalone Tool (For Deployment Scripts)
-
-Workspace-agnostic command-line tool with `kria-build`.
+### Colcon Extension (Recommended)
 
 ```bash
-# Install
-curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
+# Install directly from GitLab
+pip install git+ssh://git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git
 
-# Use
-cd ~/ros2_workspace
-kria-build --dry-run
-```
+# Or install in editable mode for development
+cd kria_ros_cross_compile
+pip install -e .
 
-## Features
-
-- **Colcon Extension** - Native `colcon buildx` integration
-- **Two Build Methods** - Docker (containerized) and SSHFS (sysroot mounting)
-- **Configuration Files** - `.buildx.conf` or `.buildx.yml` support
-- **Generic Cross-Compilation** - Not just Kria - works with any ARM64 board
-- **Persistent Build Caching** - Incremental builds (2-5min vs 10-15min)
-- **Flexible Deployment** - Deploy to any remote target via rsync
-- **Platform Detection** - Auto-detects x86_64/ARM64 and sets up emulation
-- **Pre-built Images** - Uses GitLab Container Registry
-
-## Quick Start
-
-### Installation
-
-**One-line install:**
-```bash
-curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
+# Verify installation
+colcon buildx --help
 ```
 
 ### Prerequisites
@@ -72,6 +49,7 @@ docker run --rm --platform linux/arm64 alpine uname -m
 **Note:** ARM64 machines (Apple Silicon M1/M2/M3, Raspberry Pi, etc.) don't need emulation!
 
 **Authenticate and pull Docker image:**
+
 ```bash
 # Login to GitLab registry
 docker login git.smarobox.de:5050
@@ -80,85 +58,204 @@ docker login git.smarobox.de:5050
 docker pull --platform linux/arm64 git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
 ```
 
-### Usage
+## Quick Start
+
+### 1. Create Configuration File
+
+In your ROS 2 workspace root, create `.buildx.conf`:
 
 ```bash
-# Navigate to any ROS 2 workspace
-cd ~/my_ros2_workspace
-
-# Test build (no deployment)
-kria-build --dry-run
-
-# Build and deploy to Kria board
-kria-build --sync-to kria-board:~/ros2_ws/install/
-
-# Build specific packages
-kria-build --dry-run --packages-select my_package
+# Docker method (recommended)
+method = docker
+docker_image = git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
 ```
 
-## Installation Methods
-
-### Method 1: Standalone Tool (Recommended)
-
-Install globally and use with any ROS 2 workspace:
-
-```bash
-# Install
-curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
-
-# Use from any workspace
-cd ~/workspace_A && kria-build --dry-run
-cd ~/workspace_B && kria-build --sync-to kria:~/install/
-```
-
-### Method 2: Per-Workspace Install
-
-Copy the script into each workspace:
+### 2. Build
 
 ```bash
 cd ~/my_ros2_workspace
-curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/bin/kria-build -o kria-build
-chmod +x kria-build
-
-./kria-build --dry-run
+colcon buildx
 ```
 
-## Configuration
+This will:
+- Use the Docker image
+- Cross-compile for ARM64
+- Output to `cross_build/` and `cross_install/`
 
-Create `.kria-build.conf` in your workspace root:
+### 3. Deploy (Optional)
 
 ```bash
-# .kria-build.conf
-KRIA_IMAGE=git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
-KRIA_DEFAULT_TARGET=kria-robotics:~/ros2_ws/install/
-KRIA_CONTAINER_NAME=my-project-builder
+colcon buildx --deploy
 ```
 
-See `.kria-build.conf.example` for all options.
+## Build Methods
 
-## Architecture Support
+### Docker Method (Recommended)
 
-| Architecture | Status | QEMU Needed | Notes |
-|--------------|--------|-------------|-------|
-| x86_64 (Intel/AMD) | ✅ | **Yes** | Must enable QEMU before use |
-| ARM64 (Apple Silicon) | ✅ | No | Native ARM64, no emulation |
-| ARM64 (Linux/RPi) | ✅ | No | Native ARM64, no emulation |
-| ARM64 (Kria board) | ✅ | No | Can build natively on device |
+Uses pre-built Docker containers for cross-compilation.
 
-### CI/CD Integration
+**Configuration:**
+
+```bash
+# .buildx.conf
+method = docker
+docker_image = git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+docker_platform = linux/arm64
+build_base = cross_build
+install_base = cross_install
+```
+
+**Usage:**
+
+```bash
+colcon buildx --method docker \
+  --docker-image git.smarobox.de:5050/.../jazzy-base
+```
+
+### SSHFS Sysroot Method
+
+Mounts the target board's filesystem via SSHFS and cross-compiles against it.
+
+**Configuration:**
+
+```bash
+# .buildx.conf
+method = sysroot
+sysroot_host = kria-vision-home
+sysroot_mount = ~/mnt/kria-sysroot
+toolchain = toolchainfile.cmake
+deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
+```
+
+**Usage:**
+
+```bash
+colcon buildx --method sysroot \
+  --sysroot-host kria-vision-home \
+  --toolchain toolchainfile.cmake
+```
+
+## Configuration Files
+
+### Format 1: Simple Key=Value (.buildx.conf)
+
+```bash
+# Cross-compilation method
+method = docker
+
+# Docker settings
+docker_image = git.smarobox.de:5050/.../jazzy-base
+docker_platform = linux/arm64
+
+# Build directories
+build_base = cross_build
+install_base = cross_install
+
+# Deployment
+deploy = false
+deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
+```
+
+### Format 2: YAML (.buildx.yml)
 
 ```yaml
-# .gitlab-ci.yml
-build:
-  script:
-    - curl -fsSL https://.../install.sh | bash
-    - kria-build --dry-run
-    - rsync -avz kria_products/install/ ${DEPLOY_TARGET}
+# Cross-compilation method
+method: docker
+
+# Docker settings
+docker_image: git.smarobox.de:5050/.../jazzy-base
+docker_platform: linux/arm64
+
+# Build directories
+build_base: cross_build
+install_base: cross_install
+
+# Deployment
+deploy: false
+deploy_target: ubuntu@kria-vision-home:~/ros2_ws/install/
 ```
 
-## Documentation
+### Configuration Priority
 
-- **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide with platform-specific instructions
+1. Command-line arguments (highest priority)
+2. Configuration file
+3. Default values
+
+## Usage Examples
+
+### Basic Build
+
+```bash
+colcon buildx
+```
+
+### Build Specific Packages
+
+```bash
+colcon buildx --packages-select my_package another_package
+```
+
+### Build and Deploy
+
+```bash
+colcon buildx --deploy
+```
+
+### Build with Custom CMake Args
+
+```bash
+colcon buildx --cmake-args -DCMAKE_BUILD_TYPE=Release
+```
+
+### Override Configuration
+
+```bash
+colcon buildx --method docker --docker-image custom:image
+```
+
+### Deploy to Different Target
+
+```bash
+colcon buildx --deploy --deploy-target ubuntu@other-board:~/install/
+```
+
+### Clean Build
+
+```bash
+# Remove build directories first
+rm -rf cross_build cross_install
+colcon buildx
+```
+
+### Selective Builds
+
+```bash
+# Build only one package
+colcon buildx --packages-select my_package
+
+# Skip packages (e.g., skip visualization on headless Kria)
+colcon buildx --packages-skip visualization_pkg --deploy
+```
+
+## CI/CD Integration
+
+### GitLab CI Example
+
+```yaml
+cross_compile:
+  stage: build
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  before_script:
+    - pip install git+ssh://git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git
+  script:
+    - colcon buildx --method docker --docker-image $CI_REGISTRY/...
+  artifacts:
+    paths:
+      - cross_install/
+```
 
 ## Troubleshooting
 
@@ -177,6 +274,35 @@ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
 **Solution:** Navigate to a directory containing a `src/` folder or create one.
 
+### "colcon: command not found"
+
+**Cause:** ROS environment not activated.
+
+**Solution:**
+```bash
+source /opt/ros/humble/setup.bash  # or jazzy
+```
+
+### "Docker image not found"
+
+**Cause:** Not authenticated to GitLab registry.
+
+**Solution:**
+```bash
+docker login git.smarobox.de:5050
+```
+
+### "No configuration found"
+
+**Cause:** Missing `.buildx.conf` in workspace root.
+
+**Solution:**
+```bash
+cd ~/my_ros2_workspace
+cp kria_ros_cross_compile/.buildx.conf.example .buildx.conf
+# Edit as needed
+```
+
 ### Builds are slow
 
 **Cause:** Container is being rebuilt or cache is lost.
@@ -189,32 +315,40 @@ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
 ```bash
 # Use Humble instead of Jazzy
-kria-build --image git.smarobox.de:5050/.../humble-base --dry-run
+colcon buildx --docker-image git.smarobox.de:5050/.../humble-base
 
 # Use specific commit
-kria-build --image git.smarobox.de:5050/.../jazzy-base-abc1234 --dry-run
-```
-
-### Selective Builds
-
-```bash
-# Build only one package
-kria-build --dry-run --packages-select my_package
-
-# Skip packages (e.g., skip visualization on headless Kria)
-kria-build --sync-to kria:~/install/ --packages-skip visualization_pkg
+colcon buildx --docker-image git.smarobox.de:5050/.../jazzy-base-abc1234
 ```
 
 ### Container Management
 
 ```bash
 # List containers
-docker ps -f name=ros2-kria-builder
+docker ps -f name=buildx
 
 # Clean and rebuild
-kria-build --clean --rebuild-container --dry-run
+rm -rf cross_build cross_install
+colcon buildx
 
-# Remove all build data
-docker rm -f ros2-kria-builder
-docker volume rm ros2_kria_build ros2_kria_install
+# Remove Docker volumes if needed
+docker volume ls | grep buildx
 ```
+
+## Legacy Standalone Tool
+
+The original `kria-build` script is maintained for deployment scripts and CI/CD pipelines that don't use colcon directly.
+
+**Installation:**
+```bash
+curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
+```
+
+**Usage:**
+```bash
+cd ~/ros2_workspace
+kria-build --dry-run
+kria-build --sync-to kria-board:~/ros2_ws/install/
+```
+
+The standalone tool uses the same configuration files (`.buildx.conf`) and Docker images as the colcon extension.
