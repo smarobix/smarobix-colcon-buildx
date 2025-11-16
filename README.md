@@ -19,7 +19,7 @@ Cross-compilation tools for ROS 2 targeting embedded ARM64 boards (Xilinx Kria, 
 
 ```bash
 # Install directly from GitLab
-pip install git+ssh://git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git
+pip install git+ssh://git@git.smarobox.de/smarobix/automatica-2025/kria_ros_buildx_compile.git
 
 # Or install in editable mode for development
 cd kria_ros_cross_compile
