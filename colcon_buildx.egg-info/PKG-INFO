@@ -1,12 +1,12 @@
 Metadata-Version: 2.4
 Name: colcon-buildx
-Version: 0.1.0
+Version: 0.2.0
 Summary: Colcon extension for cross-compilation to embedded ARM64 boards
 Home-page: https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile
-Author: Smarobix
-Author-email: Smarobix <info@smarobox.de>
+Author: Sergio Pertuz
+Author-email: Sergio Pertuz <sergio@smarobix.com>
 Maintainer: Smarobix
-Maintainer-email: info@smarobox.de
+Maintainer-email: sergio@smarobox.com
 License: Apache License 2.0
 Project-URL: Homepage, https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile
 Project-URL: Repository, https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile
