@@ -247,19 +247,29 @@ def install_deps_sshfs(
         # Run rosdep install on device
         print(f"📦 Running rosdep install on device...")
 
-        rosdep_cmd = f"""
-cd {remote_temp}
-echo "Initializing rosdep..."
-if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
-    sudo rosdep init || true
-fi
-rosdep update
+        # Detect ROS distro on device first
+        detect_distro_cmd = "ls /opt/ros/ 2>/dev/null | head -1"
+        distro_result = subprocess.run(
+            ['ssh', ssh_target, detect_distro_cmd],
+            capture_output=True, text=True, timeout=10
+        )
+        ros_distro = distro_result.stdout.strip() or 'jazzy'
+        print(f"  Detected ROS distro on device: {ros_distro}")
 
-echo "Installing dependencies..."
-rosdep install --from-paths src {rosdep_args}
-"""
+        # Build the rosdep command as a single string for SSH
+        # Source ROS setup first to set ROS_DISTRO and other env vars
+        rosdep_cmd = (
+            f"source /opt/ros/{ros_distro}/setup.bash && "
+            f"cd {remote_temp} && "
+            f"echo 'Initializing rosdep...' && "
+            f"([ -f /etc/ros/rosdep/sources.list.d/20-default.list ] || sudo rosdep init || true) && "
+            f"rosdep update && "
+            f"echo 'Installing dependencies...' && "
+            f"rosdep install --from-paths src {rosdep_args}"
+        )
 
-        ssh_cmd = ['ssh', ssh_target, 'bash', '-c', rosdep_cmd]
+        # Pass command as single string to SSH
+        ssh_cmd = ['ssh', ssh_target, rosdep_cmd]
 
         install_result = subprocess.run(
             ssh_cmd,
