@@ -65,6 +65,8 @@ class BuildxVerb(VerbExtensionPoint):
             help='Skip SSHFS mounting (assume sysroot already mounted)'
         )
 
+        # Note: --install-deps and --rosdep-args also work with sysroot method
+
         # Docker-specific arguments
         docker_group = parser.add_argument_group('Docker Options (--method docker)')
         docker_group.add_argument(
@@ -75,6 +77,26 @@ class BuildxVerb(VerbExtensionPoint):
             '--docker-platform',
             default='linux/arm64',
             help='Target platform for Docker (default: linux/arm64)'
+        )
+        docker_group.add_argument(
+            '--sync-from-device',
+            metavar='SSH_TARGET',
+            help='Sync package versions from target device (e.g., ubuntu@192.168.1.100). Creates local synced image.'
+        )
+        docker_group.add_argument(
+            '--use-base-image',
+            action='store_true',
+            help='Force use of base image, skip auto-detection of synced images'
+        )
+        docker_group.add_argument(
+            '--install-deps',
+            action='store_true',
+            help='Install workspace dependencies using rosdep before build'
+        )
+        docker_group.add_argument(
+            '--rosdep-args',
+            default='--ignore-src -y',
+            help='Additional arguments to pass to rosdep install (default: --ignore-src -y)'
         )
 
         # Deployment
@@ -134,6 +156,14 @@ class BuildxVerb(VerbExtensionPoint):
                     no_mount=args.no_mount
                 )
 
+                # Install dependencies if requested
+                if hasattr(args, 'install_deps') and args.install_deps:
+                    logger.info(f"📦 Installing workspace dependencies on device...")
+                    rosdep_args = getattr(args, 'rosdep_args', '--ignore-src -y')
+                    if not builder.install_dependencies(rosdep_args):
+                        logger.error("❌ Failed to install dependencies")
+                        return 1
+
             elif args.method == 'docker':
                 # Docker-based cross-compilation
                 if not args.docker_image:
@@ -142,12 +172,37 @@ class BuildxVerb(VerbExtensionPoint):
                     return 1
 
                 from colcon_buildx.docker import DockerBuilder
+
+                # Handle package sync if requested
+                use_base_image = getattr(args, 'use_base_image', False)
                 builder = DockerBuilder(
                     image=args.docker_image,
                     platform=args.docker_platform,
                     build_base=args.build_base,
-                    install_base=args.install_base
+                    install_base=args.install_base,
+                    use_base_image=use_base_image
                 )
+
+                # Sync from device if requested
+                if hasattr(args, 'sync_from_device') and args.sync_from_device:
+                    logger.info(f"📦 Syncing packages from device: {args.sync_from_device}")
+                    synced_image = builder.create_synced_image(args.sync_from_device)
+                    if not synced_image:
+                        logger.error("❌ Failed to create synced image")
+                        return 1
+                    # Update builder to use synced image
+                    builder.image = synced_image
+
+                # Install dependencies if requested
+                if hasattr(args, 'install_deps') and args.install_deps:
+                    logger.info(f"📦 Installing workspace dependencies...")
+                    rosdep_args = getattr(args, 'rosdep_args', '--ignore-src -y')
+                    updated_image = builder.install_dependencies(rosdep_args)
+                    if not updated_image:
+                        logger.error("❌ Failed to install dependencies")
+                        return 1
+                    # Update builder to use updated image
+                    builder.image = updated_image
 
             # Execute the build
             logger.info("🚀 Starting cross-compilation build...")

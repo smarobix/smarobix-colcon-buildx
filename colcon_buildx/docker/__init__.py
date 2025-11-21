@@ -2,7 +2,9 @@
 
 import os
 import subprocess
+import re
 from pathlib import Path
+from datetime import datetime
 
 from colcon_core.logging import colcon_logger
 
@@ -12,7 +14,7 @@ logger = colcon_logger.getChild(__name__)
 class DockerBuilder:
     """Handles cross-compilation using Docker containers."""
 
-    def __init__(self, image, platform, build_base, install_base):
+    def __init__(self, image, platform, build_base, install_base, use_base_image=False):
         """
         Initialize Docker builder.
 
@@ -21,13 +23,21 @@ class DockerBuilder:
             platform: Target platform (e.g., linux/arm64)
             build_base: Build directory
             install_base: Install directory
+            use_base_image: Force use of base image, skip synced image detection
         """
-        self.image = image
+        self.base_image = image
         self.platform = platform
         self.build_base = build_base
         self.install_base = install_base
         self.workspace_root = self._find_workspace_root()
         self.container_name = 'colcon-buildx-builder'
+        self.use_base_image = use_base_image
+
+        # Detect synced image if not forcing base
+        if not use_base_image:
+            self.image = self.detect_synced_image()
+        else:
+            self.image = self.base_image
 
     def _find_workspace_root(self):
         """Find the workspace root by looking for src/ directory."""
@@ -40,6 +50,125 @@ class DockerBuilder:
                 break
             current = parent
         return Path.cwd()
+
+    def detect_synced_image(self):
+        """
+        Detect if a synced version of the base image exists locally.
+
+        Returns:
+            Synced image name if found, otherwise base image name
+        """
+        # Extract base tag from full image name
+        if ':' in self.base_image:
+            registry_and_repo, base_tag = self.base_image.rsplit(':', 1)
+        else:
+            registry_and_repo = self.base_image
+            base_tag = 'latest'
+
+        # Remove any existing -synced-YYYYMMDD suffix
+        base_tag_clean = re.sub(r'-synced-\d{8}$', '', base_tag)
+
+        # Search for synced images matching pattern
+        pattern = f"{base_tag_clean}-synced-*"
+
+        try:
+            result = subprocess.run(
+                ['docker', 'images', '--format', '{{.Repository}}:{{.Tag}}'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            synced_images = []
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+
+                # Check if this image matches our pattern
+                if ':' in line:
+                    repo, tag = line.rsplit(':', 1)
+                    # Match against base tag pattern
+                    if re.match(f"{re.escape(base_tag_clean)}-synced-\\d{{8}}$", tag):
+                        synced_images.append((tag, line))
+
+            if synced_images:
+                # Sort by date (newest first)
+                synced_images.sort(reverse=True, key=lambda x: x[0])
+                newest_tag, newest_image = synced_images[0]
+
+                # Extract date from tag
+                date_match = re.search(r'-synced-(\d{8})$', newest_tag)
+                date_str = date_match.group(1) if date_match else 'unknown'
+
+                # Format date nicely for display
+                try:
+                    date_obj = datetime.strptime(date_str, '%Y%m%d')
+                    formatted_date = date_obj.strftime('%Y-%m-%d')
+                except:
+                    formatted_date = date_str
+
+                logger.info(f"ℹ Using synced image: {newest_tag} (synced on {formatted_date})")
+                logger.info(f"ℹ Run with --use-base-image to use original base image instead")
+
+                return newest_image
+
+        except subprocess.CalledProcessError:
+            pass
+
+        # No synced image found
+        logger.info(f"ℹ Using base image: {self.base_image}")
+        logger.info(f"ℹ Run --sync-from-device <target> to create synced version")
+        return self.base_image
+
+    def create_synced_image(self, ssh_target):
+        """
+        Create a synced version of the base image from target device.
+
+        Args:
+            ssh_target: SSH connection string (e.g., 'ubuntu@192.168.1.100')
+
+        Returns:
+            New synced image tag, or None if sync failed
+        """
+        from colcon_buildx.package_sync import sync_packages_from_device
+
+        manifest_path = self.workspace_root / '.buildx-sync-manifest.json'
+
+        try:
+            synced_tag = sync_packages_from_device(
+                self.base_image,
+                ssh_target,
+                manifest_path
+            )
+            return synced_tag
+        except Exception as e:
+            logger.error(f"❌ Failed to sync packages: {e}")
+            return None
+
+    def install_dependencies(self, rosdep_args='--ignore-src -y'):
+        """
+        Install workspace dependencies using rosdep.
+
+        Args:
+            rosdep_args: Additional arguments for rosdep install
+
+        Returns:
+            New synced image tag with dependencies installed, or None if failed
+        """
+        from colcon_buildx.rosdep_manager import install_deps_docker
+
+        try:
+            # Use current image (could be base or already synced)
+            updated_tag = install_deps_docker(
+                self.image,
+                self.workspace_root,
+                self.platform,
+                rosdep_args
+            )
+            return updated_tag
+        except Exception as e:
+            logger.error(f"❌ Failed to install dependencies: {e}")
+            return None
 
     def check_docker(self):
         """Check if Docker is available and running."""

@@ -32,6 +32,19 @@ class SysrootBuilder:
         self.install_base = install_base
         self.no_mount = no_mount
         self._mounted_by_us = False
+        self.workspace_root = self._find_workspace_root()
+
+    def _find_workspace_root(self):
+        """Find the workspace root by looking for src/ directory."""
+        current = Path.cwd()
+        for _ in range(5):
+            if (current / 'src').is_dir():
+                return current
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+        return Path.cwd()
 
     def is_mounted(self):
         """Check if sysroot is currently mounted."""
@@ -106,6 +119,29 @@ class SysrootBuilder:
             except subprocess.CalledProcessError:
                 logger.warning(f"⚠️  Failed to unmount sysroot")
                 return False
+
+    def install_dependencies(self, rosdep_args='--ignore-src -y'):
+        """
+        Install workspace dependencies on target device using rosdep.
+
+        Args:
+            rosdep_args: Additional arguments for rosdep install
+
+        Returns:
+            True if successful, False otherwise
+        """
+        from colcon_buildx.rosdep_manager import install_deps_sshfs
+
+        try:
+            success = install_deps_sshfs(
+                self.sysroot_host,
+                self.workspace_root,
+                rosdep_args
+            )
+            return success
+        except Exception as e:
+            logger.error(f"❌ Failed to install dependencies: {e}")
+            return False
 
     def setup_environment(self):
         """Set up environment variables for cross-compilation."""

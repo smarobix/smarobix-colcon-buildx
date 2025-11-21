@@ -9,6 +9,8 @@ Cross-compilation tools for ROS 2 targeting embedded ARM64 boards (Xilinx Kria, 
 **Features:**
 - **Native Colcon Integration** - `colcon buildx` command with full colcon argument support
 - **Two Build Methods** - Docker (containerized) and SSHFS (sysroot mounting - untested)
+- **Package Synchronization** - Sync package versions between Docker image and target device
+- **Automatic Dependency Installation** - rosdep integration for both build methods
 - **Configuration Files** - `.buildx.conf` or `.buildx.yml` for project-specific settings
 - **Automatic Deployment** - Optional rsync deployment to target boards
 - **Generic** - Works with any ARM64 board with a Docker image
@@ -88,6 +90,48 @@ This will:
 ```bash
 colcon buildx --deploy
 ```
+
+## Package Synchronization
+
+The tool provides two mechanisms to keep packages synchronized (between Docker image and target):
+
+### 1. Device-Synced Docker Images (Recommended)
+
+Sync package versions from your target device to create a locally-committed Docker image:
+
+```bash
+# Create synced image from device
+colcon buildx --sync-from-device ubuntu@192.168.1.100
+
+# This creates a local image: <original-tag>-synced-20250120
+# Future builds automatically use the synced image
+colcon buildx
+
+# Output:
+# ℹ Using synced image: jazzy-base-synced-20250120 (synced on 2025-01-20)
+# ℹ Run with --use-base-image to use original base image instead
+```
+
+### 2. Automatic Dependency Installation
+
+Install ROS package dependencies from your workspace using rosdep:
+
+```bash
+# Docker method: installs deps in container, creates synced image
+colcon buildx --install-deps
+
+# SSHFS method: installs deps on target device via SSH
+colcon buildx --method sysroot --sysroot-host kria --install-deps
+
+colcon buildx --install-deps --rosdep-args "--ignore-src -y --skip-keys=python3-numpy"
+```
+
+### Package Sync Details
+
+**Packages that differ:**
+- **Common packages** (in both image and device): Version-matched
+- **Device-only packages**: Ignored (not installed in image)
+- **Image-only packages**: Ignored (not removed from image)
 
 ## Build Methods
 
@@ -196,6 +240,25 @@ colcon buildx
 colcon buildx --packages-select my_package another_package
 ```
 
+### Build with Package Sync
+
+```bash
+# First-time setup: sync from device
+colcon buildx --sync-from-device ubuntu@192.168.1.100
+
+# Install dependencies
+colcon buildx --install-deps
+
+# Or do both at once
+colcon buildx --sync-from-device ubuntu@kria --install-deps
+
+# Normal builds (auto-uses synced image)
+colcon buildx
+
+# Force using original base image
+colcon buildx --use-base-image
+```
+
 ### Build and Deploy
 
 ```bash
@@ -236,6 +299,16 @@ colcon buildx --packages-select my_package
 
 # Skip packages (e.g., skip visualization on headless Kria)
 colcon buildx --packages-skip visualization_pkg --deploy
+```
+
+### SSHFS with Dependencies
+
+```bash
+# Install deps on device, then build with SSHFS
+colcon buildx --method sysroot \
+  --sysroot-host kria-vision-home \
+  --toolchain toolchainfile.cmake \
+  --install-deps
 ```
 
 ## CI/CD Integration
@@ -308,6 +381,53 @@ cp kria_ros_cross_compile/.buildx.conf.example .buildx.conf
 **Cause:** Container is being rebuilt or cache is lost.
 
 **Solution:** Don't use `--rebuild-container` unless necessary. The tool uses persistent Docker volumes for fast incremental builds.
+
+### "Package sync failed" or SSH connection issues
+
+**Cause:** Cannot connect to target device via SSH.
+
+**Solution:**
+```bash
+# Test SSH connection first
+ssh ubuntu@192.168.1.100
+
+# Ensure passwordless SSH is set up
+ssh-copy-id ubuntu@192.168.1.100
+
+# Check firewall settings on device
+```
+
+### Synced image not being used
+
+**Cause:** Auto-detection might not find the synced image.
+
+**Solution:**
+```bash
+# List Docker images to verify synced image exists
+docker images | grep synced
+
+# Manually specify to use base image if needed
+colcon buildx --use-base-image
+
+# Re-sync if image was accidentally deleted
+colcon buildx --sync-from-device ubuntu@kria
+```
+
+### rosdep install fails
+
+**Cause:** rosdep not initialized or package dependencies incorrect.
+
+**Solution:**
+```bash
+# For Docker method: the tool handles rosdep init automatically
+
+# For SSHFS method: initialize rosdep on device
+ssh ubuntu@kria
+sudo rosdep init
+rosdep update
+
+# Check package.xml files for correct dependency names
+```
 
 ## Advanced Usage
 
