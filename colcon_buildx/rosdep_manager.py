@@ -269,24 +269,17 @@ def install_deps_sshfs(
         )
 
         # Pass command as single string to SSH
+        # Run interactively (no capture) to allow password prompts and show real-time output
         ssh_cmd = ['ssh', ssh_target, rosdep_cmd]
 
         install_result = subprocess.run(
             ssh_cmd,
-            capture_output=True,
-            text=True,
             timeout=600  # 10 minutes timeout
         )
 
         if install_result.returncode != 0:
-            print(f"❌ rosdep install failed on device:")
-            print(install_result.stderr)
+            print(f"❌ rosdep install failed on device")
             return False
-
-        # Show relevant output
-        for line in install_result.stdout.split('\n'):
-            if 'Installing' in line or 'installed' in line or 'already installed' in line:
-                print(f"  {line}")
 
         print(f"\n{'='*60}")
         print(f"✓ Successfully installed dependencies on device")
