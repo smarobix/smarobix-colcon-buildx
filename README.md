@@ -95,43 +95,20 @@ colcon buildx --deploy
 
 The tool provides two mechanisms to keep packages synchronized (between Docker image and target):
 
-### 1. Device-Synced Docker Images (Recommended)
+### Automatic Dependency Installation (Recommended Workflow)
 
-Sync package versions from your target device to create a locally-committed Docker image:
+The **device is the source of truth**. Install dependencies on the device first, then sync Docker to match:
 
 ```bash
-# Create synced image from device
-colcon buildx --sync-from-device ubuntu@192.168.1.100
+# Step 1: Install workspace dependencies on target device
+colcon buildx --install-deps-on-device ubuntu@kria
 
-# This creates a local image: <original-tag>-synced-20250120
-# Future builds automatically use the synced image
+# Step 2: Sync Docker image to match device (picks up new deps)
+colcon buildx --sync-from-device ubuntu@kria
+
+# Step 3: Build
 colcon buildx
-
-# Output:
-# ℹ Using synced image: jazzy-base-synced-20250120 (synced on 2025-01-20)
-# ℹ Run with --use-base-image to use original base image instead
 ```
-
-### 2. Automatic Dependency Installation
-
-Install ROS package dependencies from your workspace using rosdep:
-
-```bash
-# Docker method: installs deps in container, creates synced image
-colcon buildx --install-deps
-
-# SSHFS method: installs deps on target device via SSH
-colcon buildx --method sysroot --sysroot-host kria --install-deps
-
-colcon buildx --install-deps --rosdep-args "--ignore-src -y --skip-keys=python3-numpy"
-```
-
-### Package Sync Details
-
-**Packages that differ:**
-- **Common packages** (in both image and device): Version-matched
-- **Device-only packages**: Ignored (not installed in image)
-- **Image-only packages**: Ignored (not removed from image)
 
 ## Build Methods
 
@@ -240,22 +217,19 @@ colcon buildx
 colcon buildx --packages-select my_package another_package
 ```
 
-### Build with Package Sync
+### Build with Package Sync (Recommended Workflow)
 
 ```bash
-# First-time setup: sync from device
-colcon buildx --sync-from-device ubuntu@192.168.1.100
+# Step 1: Install workspace dependencies on target device
+colcon buildx --install-deps-on-device ubuntu@kria
 
-# Install dependencies
-colcon buildx --install-deps
+# Step 2: Sync Docker image to match device
+colcon buildx --sync-from-device ubuntu@kria
 
-# Or do both at once
-colcon buildx --sync-from-device ubuntu@kria --install-deps
-
-# Normal builds (auto-uses synced image)
+# Step 3: Build (auto-uses synced image)
 colcon buildx
 
-# Force using original base image
+# Force using original base image if needed
 colcon buildx --use-base-image
 ```
 

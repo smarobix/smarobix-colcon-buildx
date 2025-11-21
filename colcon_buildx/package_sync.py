@@ -157,39 +157,59 @@ def compare_packages(
     return version_diffs, device_only, image_only
 
 
-def generate_sync_script(version_diffs: Dict[str, Tuple[PackageInfo, PackageInfo]]) -> str:
+def generate_sync_script(
+    version_diffs: Dict[str, Tuple[PackageInfo, PackageInfo]],
+    device_only_pkgs: Dict[str, PackageInfo] = None
+) -> str:
     """
     Generate bash script to sync package versions in Docker container.
 
     Args:
         version_diffs: Dictionary of packages with version differences
+        device_only_pkgs: Dictionary of packages only on device (to be installed)
 
     Returns:
         Bash script as string
     """
-    if not version_diffs:
+    device_only_pkgs = device_only_pkgs or {}
+
+    if not version_diffs and not device_only_pkgs:
         return "echo 'No packages to sync'"
 
-    # Build list of packages with exact versions
-    packages_to_install = []
+    # Build list of packages to version-match
+    packages_to_upgrade = []
     for name, (device_pkg, _) in version_diffs.items():
         # Use exact version specification
+        packages_to_upgrade.append(f"{name}={device_pkg.version}")
+
+    # Build list of device-only packages to install
+    packages_to_install = []
+    for name, device_pkg in device_only_pkgs.items():
         packages_to_install.append(f"{name}={device_pkg.version}")
 
-    # Join all packages into a single space-separated string
-    packages_str = " ".join(packages_to_install)
-
-    script = f"""#!/bin/bash
+    script = """#!/bin/bash
 set -e
 
 echo "Updating package lists..."
 apt-get update -qq
 
-echo "Packages to sync: {packages_str}"
-echo "Syncing package versions..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades {packages_str}
+"""
 
-echo "Cleaning up..."
+    if packages_to_upgrade:
+        upgrade_str = " ".join(packages_to_upgrade)
+        script += f"""echo "Version-matching {len(packages_to_upgrade)} packages..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades {upgrade_str}
+
+"""
+
+    if packages_to_install:
+        install_str = " ".join(packages_to_install)
+        script += f"""echo "Installing {len(packages_to_install)} device-only packages..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y {install_str}
+
+"""
+
+    script += """echo "Cleaning up..."
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 
@@ -306,11 +326,14 @@ def sync_packages_from_device(
     # Compare packages
     version_diffs, device_only, image_only = compare_packages(device_pkgs, image_pkgs)
 
-    # Show warnings for divergent packages
+    # Build dict of device-only packages for installation
+    device_only_pkgs = {name: device_pkgs[name] for name in device_only}
+
+    # Show info about packages
     if device_only:
         device_only_list = sorted(list(device_only))[:10]  # Show first 10
         more = len(device_only) - 10
-        print(f"\n⚠ Packages only on device (ignored): {', '.join(device_only_list)}" +
+        print(f"\nℹ Packages only on device (will install): {', '.join(device_only_list)}" +
               (f" ... and {more} more" if more > 0 else ""))
 
     if image_only:
@@ -319,8 +342,8 @@ def sync_packages_from_device(
         print(f"⚠ Packages only in image (ignored): {', '.join(image_only_list)}" +
               (f" ... and {more} more" if more > 0 else ""))
 
-    if not version_diffs:
-        print(f"\n✓ All {len(device_pkgs & image_pkgs)} common packages are already in sync!")
+    if not version_diffs and not device_only:
+        print(f"\n✓ All packages are already in sync!")
         new_tag = generate_synced_tag(base_image)
         # Still create the tag to mark it as synced
         print(f"ℹ Creating synced image tag anyway: {new_tag}")
@@ -342,7 +365,7 @@ def sync_packages_from_device(
                 "source": ssh_target,
                 "timestamp": datetime.now().isoformat(),
                 "packages_synced": 0,
-                "packages_device_only": len(device_only),
+                "packages_installed": 0,
                 "packages_image_only": len(image_only),
                 "version_differences": 0
             }]
@@ -351,10 +374,14 @@ def sync_packages_from_device(
 
         return new_tag
 
-    print(f"\nℹ Found {len(version_diffs)} packages with different versions")
+    # Summary of what will happen
+    if version_diffs:
+        print(f"\nℹ Found {len(version_diffs)} packages with different versions (will upgrade)")
+    if device_only:
+        print(f"ℹ Found {len(device_only)} device-only packages (will install)")
 
-    # Generate sync script
-    sync_script = generate_sync_script(version_diffs)
+    # Generate sync script with both version diffs and device-only packages
+    sync_script = generate_sync_script(version_diffs, device_only_pkgs)
 
     # Run sync in a container and keep it running so we can commit
     print(f"\n🔄 Creating container and syncing packages...")
@@ -391,7 +418,11 @@ def sync_packages_from_device(
                 if line.strip():
                     print(f"  {line}")
 
-        print(f"✓ Synced {len(version_diffs)} packages to match device versions")
+        # Summary message
+        if version_diffs:
+            print(f"✓ Version-matched {len(version_diffs)} packages")
+        if device_only:
+            print(f"✓ Installed {len(device_only)} device-only packages")
 
         # Commit container to new image
         new_tag = generate_synced_tag(base_image)
@@ -406,8 +437,8 @@ def sync_packages_from_device(
                 "type": "device-sync",
                 "source": ssh_target,
                 "timestamp": datetime.now().isoformat(),
-                "packages_synced": len(version_diffs),
-                "packages_device_only": len(device_only),
+                "packages_version_matched": len(version_diffs),
+                "packages_installed": len(device_only),
                 "packages_image_only": len(image_only)
             }]
         }
