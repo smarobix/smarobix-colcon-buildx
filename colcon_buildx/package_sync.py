@@ -182,10 +182,8 @@ def generate_sync_script(
         # Use exact version specification
         packages_to_upgrade.append(f"{name}={device_pkg.version}")
 
-    # Build list of device-only packages to install
-    packages_to_install = []
-    for name, device_pkg in device_only_pkgs.items():
-        packages_to_install.append(f"{name}={device_pkg.version}")
+    # Build list of device-only packages (just names for availability check)
+    device_only_names = list(device_only_pkgs.keys())
 
     script = """#!/bin/bash
 set -e
@@ -202,10 +200,37 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades {upgrade_st
 
 """
 
-    if packages_to_install:
-        install_str = " ".join(packages_to_install)
-        script += f"""echo "Installing {len(packages_to_install)} device-only packages..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y {install_str}
+    if device_only_names:
+        # Generate script that checks availability before installing
+        packages_list = " ".join(device_only_names)
+        script += f"""
+echo "Checking availability of {len(device_only_names)} device-only packages..."
+DEVICE_ONLY_PACKAGES="{packages_list}"
+AVAILABLE_PACKAGES=""
+UNAVAILABLE_PACKAGES=""
+AVAILABLE_COUNT=0
+UNAVAILABLE_COUNT=0
+
+for pkg in $DEVICE_ONLY_PACKAGES; do
+    if apt-cache show "$pkg" > /dev/null 2>&1; then
+        AVAILABLE_PACKAGES="$AVAILABLE_PACKAGES $pkg"
+        AVAILABLE_COUNT=$((AVAILABLE_COUNT + 1))
+    else
+        UNAVAILABLE_PACKAGES="$UNAVAILABLE_PACKAGES $pkg"
+        UNAVAILABLE_COUNT=$((UNAVAILABLE_COUNT + 1))
+    fi
+done
+
+if [ $UNAVAILABLE_COUNT -gt 0 ]; then
+    echo "⚠ Skipping $UNAVAILABLE_COUNT unavailable packages (not in Docker repos)"
+fi
+
+if [ $AVAILABLE_COUNT -gt 0 ]; then
+    echo "Installing $AVAILABLE_COUNT available device-only packages..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y $AVAILABLE_PACKAGES
+else
+    echo "No device-only packages available in Docker repos"
+fi
 
 """
 
