@@ -40,10 +40,10 @@ def extract_device_packages(ssh_target: str) -> Dict[str, PackageInfo]:
     """
     print(f"📦 Extracting package list from device {ssh_target}...")
 
-    cmd = [
-        'ssh', ssh_target,
-        'dpkg-query', '-W', '-f=${Package}\t${Version}\t${Architecture}\n'
-    ]
+    # Use single quotes around the format string to prevent shell expansion of ${...}
+    # The entire dpkg-query command is passed as a single string to bash -c
+    remote_cmd = "dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\n'"
+    cmd = ['ssh', ssh_target, 'bash', '-c', remote_cmd]
 
     try:
         result = subprocess.run(
@@ -51,7 +51,7 @@ def extract_device_packages(ssh_target: str) -> Dict[str, PackageInfo]:
             capture_output=True,
             text=True,
             check=True,
-            timeout=30
+            timeout=60
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"SSH connection to {ssh_target} timed out")
