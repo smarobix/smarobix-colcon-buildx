@@ -8,6 +8,8 @@ a Docker image and a target device via SSH.
 import subprocess
 import json
 import re
+import sys
+from collections import deque
 from datetime import datetime
 from typing import Dict, Tuple, Set
 from pathlib import Path
@@ -417,8 +419,11 @@ def sync_packages_from_device(
 
     try:
         # Run sync script in container (don't use --rm so we can commit)
-        print("📦 Installing synchronized packages...")
-        run_result = subprocess.run(
+        # Show rolling tail of output like docker build does
+        print("📦 Installing synchronized packages (this may take a while with QEMU)...")
+        print("-" * 40)
+
+        process = subprocess.Popen(
             [
                 'docker', 'run',
                 '--name', container_name,
@@ -426,22 +431,52 @@ def sync_packages_from_device(
                 base_image,
                 'bash', '-c', sync_script
             ],
-            capture_output=True,
-            text=True,
-            timeout=1800  # 30 minutes for package installation (QEMU can be slow)
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
         )
 
-        if run_result.returncode != 0:
-            print(f"❌ Package sync failed:")
-            print(f"stdout: {run_result.stdout}")
-            print(f"stderr: {run_result.stderr}")
-            raise RuntimeError("Package synchronization failed")
+        # Show rolling tail of last N lines
+        tail_size = 15
+        tail_buffer = deque(maxlen=tail_size)
+        lines_printed = 0
 
-        # Show output from sync
-        if run_result.stdout:
-            for line in run_result.stdout.split('\n'):
-                if line.strip():
-                    print(f"  {line}")
+        try:
+            for line in iter(process.stdout.readline, ''):
+                if not line:
+                    break
+                line = line.rstrip()
+                tail_buffer.append(line)
+
+                # Clear previous tail and reprint
+                if lines_printed > 0:
+                    # Move cursor up and clear lines
+                    sys.stdout.write(f"\033[{lines_printed}A")  # Move up
+                    for _ in range(lines_printed):
+                        sys.stdout.write("\033[2K\n")  # Clear line
+                    sys.stdout.write(f"\033[{lines_printed}A")  # Move back up
+
+                # Print current tail
+                lines_printed = len(tail_buffer)
+                for tail_line in tail_buffer:
+                    # Truncate long lines
+                    if len(tail_line) > 80:
+                        tail_line = tail_line[:77] + "..."
+                    print(f"  {tail_line}")
+
+                sys.stdout.flush()
+
+            process.wait(timeout=3600)  # 60 minutes timeout
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise
+
+        print("-" * 40)
+
+        if process.returncode != 0:
+            print(f"❌ Package sync failed")
+            raise RuntimeError("Package synchronization failed")
 
         # Summary message
         if version_diffs:
