@@ -40,10 +40,10 @@ def extract_device_packages(ssh_target: str) -> Dict[str, PackageInfo]:
     """
     print(f"📦 Extracting package list from device {ssh_target}...")
 
-    # Use single quotes around the format string to prevent shell expansion of ${...}
-    # The entire dpkg-query command is passed as a single string to bash -c
-    remote_cmd = "dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\n'"
-    cmd = ['ssh', ssh_target, 'bash', '-c', remote_cmd]
+    # Pass the entire command as a single string to SSH
+    # SSH will execute it in a shell on the remote side
+    remote_cmd = "dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n'"
+    cmd = ['ssh', ssh_target, remote_cmd]
 
     try:
         result = subprocess.run(
