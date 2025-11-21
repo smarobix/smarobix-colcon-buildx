@@ -205,15 +205,22 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades {upgrade_st
     if device_only_names:
         # Generate script that checks availability before installing
         packages_list = " ".join(device_only_names)
+        total_packages = len(device_only_names)
         script += f"""
-echo "Checking availability of {len(device_only_names)} device-only packages..."
+echo "Checking availability of {total_packages} device-only packages..."
 DEVICE_ONLY_PACKAGES="{packages_list}"
 AVAILABLE_PACKAGES=""
 UNAVAILABLE_PACKAGES=""
 AVAILABLE_COUNT=0
 UNAVAILABLE_COUNT=0
+CHECKED_COUNT=0
+TOTAL_COUNT={total_packages}
 
 for pkg in $DEVICE_ONLY_PACKAGES; do
+    CHECKED_COUNT=$((CHECKED_COUNT + 1))
+    if [ $((CHECKED_COUNT % 25)) -eq 0 ] || [ $CHECKED_COUNT -eq $TOTAL_COUNT ]; then
+        echo "  Progress: $CHECKED_COUNT/$TOTAL_COUNT packages checked..."
+    fi
     if apt-cache show "$pkg" > /dev/null 2>&1; then
         AVAILABLE_PACKAGES="$AVAILABLE_PACKAGES $pkg"
         AVAILABLE_COUNT=$((AVAILABLE_COUNT + 1))
@@ -222,6 +229,8 @@ for pkg in $DEVICE_ONLY_PACKAGES; do
         UNAVAILABLE_COUNT=$((UNAVAILABLE_COUNT + 1))
     fi
 done
+
+echo "Availability check complete: $AVAILABLE_COUNT available, $UNAVAILABLE_COUNT unavailable"
 
 if [ $UNAVAILABLE_COUNT -gt 0 ]; then
     echo "⚠ Skipping $UNAVAILABLE_COUNT unavailable packages (not in Docker repos)"
@@ -419,9 +428,8 @@ def sync_packages_from_device(
 
     try:
         # Run sync script in container (don't use --rm so we can commit)
-        # Show rolling tail of output like docker build does
+        # Show filtered progress output
         print("📦 Installing synchronized packages (this may take a while with QEMU)...")
-        print("-" * 40)
 
         process = subprocess.Popen(
             [
@@ -433,38 +441,44 @@ def sync_packages_from_device(
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True
+            text=True,
+            bufsize=1  # Line buffered
         )
 
-        # Show rolling tail of last N lines
-        tail_size = 15
-        tail_buffer = deque(maxlen=tail_size)
-        lines_printed = 0
+        # Keywords that indicate progress - show these lines
+        progress_keywords = [
+            'Updating package',
+            'Version-matching',
+            'Progress:',
+            'Availability check',
+            'Skipping',
+            'Installing',
+            'Setting up',
+            'Unpacking',
+            'Cleaning up',
+            'Package sync complete',
+            'available',
+            'unavailable',
+        ]
+
+        last_output = []  # Keep last few lines for error reporting
 
         try:
             for line in iter(process.stdout.readline, ''):
                 if not line:
                     break
                 line = line.rstrip()
-                tail_buffer.append(line)
+                last_output.append(line)
+                if len(last_output) > 20:
+                    last_output.pop(0)
 
-                # Clear previous tail and reprint
-                if lines_printed > 0:
-                    # Move cursor up and clear lines
-                    sys.stdout.write(f"\033[{lines_printed}A")  # Move up
-                    for _ in range(lines_printed):
-                        sys.stdout.write("\033[2K\n")  # Clear line
-                    sys.stdout.write(f"\033[{lines_printed}A")  # Move back up
-
-                # Print current tail
-                lines_printed = len(tail_buffer)
-                for tail_line in tail_buffer:
+                # Show lines that indicate progress
+                if any(kw in line for kw in progress_keywords):
                     # Truncate long lines
-                    if len(tail_line) > 80:
-                        tail_line = tail_line[:77] + "..."
-                    print(f"  {tail_line}")
-
-                sys.stdout.flush()
+                    if len(line) > 100:
+                        line = line[:97] + "..."
+                    print(f"  {line}")
+                    sys.stdout.flush()
 
             process.wait(timeout=3600)  # 60 minutes timeout
 
@@ -472,10 +486,10 @@ def sync_packages_from_device(
             process.kill()
             raise
 
-        print("-" * 40)
-
         if process.returncode != 0:
-            print(f"❌ Package sync failed")
+            print(f"❌ Package sync failed. Last output:")
+            for line in last_output[-10:]:
+                print(f"  {line}")
             raise RuntimeError("Package synchronization failed")
 
         # Summary message
