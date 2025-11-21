@@ -428,7 +428,7 @@ def sync_packages_from_device(
             ],
             capture_output=True,
             text=True,
-            timeout=600  # 10 minutes for package installation
+            timeout=1800  # 30 minutes for package installation (QEMU can be slow)
         )
 
         if run_result.returncode != 0:
@@ -477,7 +477,7 @@ def sync_packages_from_device(
         return new_tag
 
     except subprocess.TimeoutExpired:
-        raise RuntimeError("Package sync timed out after 10 minutes")
+        raise RuntimeError("Package sync timed out after 30 minutes")
     finally:
         # Clean up container
         subprocess.run(['docker', 'rm', '-f', container_name],
