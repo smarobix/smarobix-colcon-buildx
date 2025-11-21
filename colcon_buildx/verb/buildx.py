@@ -172,9 +172,8 @@ class BuildxVerb(VerbExtensionPoint):
                 logger.info("✅ Dependencies installed on device")
                 logger.info("ℹ Next step: run --sync-from-device to update Docker image")
 
-                # If no other operations requested, exit successfully
-                if not args.docker_image and args.method == 'docker':
-                    return 0
+                # This is a standalone operation, exit after completion
+                return 0
 
             if args.method == 'sysroot':
                 # SSHFS-based cross-compilation
