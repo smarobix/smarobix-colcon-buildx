@@ -170,30 +170,25 @@ def generate_sync_script(version_diffs: Dict[str, Tuple[PackageInfo, PackageInfo
     if not version_diffs:
         return "echo 'No packages to sync'"
 
-    # Group packages to avoid apt conflicts
+    # Build list of packages with exact versions
     packages_to_install = []
-    for name, (device_pkg, image_pkg) in version_diffs.items():
+    for name, (device_pkg, _) in version_diffs.items():
         # Use exact version specification
         packages_to_install.append(f"{name}={device_pkg.version}")
 
-    script = """#!/bin/bash
+    # Join all packages into a single space-separated string
+    packages_str = " ".join(packages_to_install)
+
+    script = f"""#!/bin/bash
 set -e
 
 echo "Updating package lists..."
 apt-get update -qq
 
+echo "Packages to sync: {packages_str}"
 echo "Syncing package versions..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \\
-"""
+DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades {packages_str}
 
-    # Add packages with proper escaping and line continuation
-    for i, pkg in enumerate(packages_to_install):
-        if i == len(packages_to_install) - 1:
-            script += f"    \"{pkg}\"\n"
-        else:
-            script += f"    \"{pkg}\" \\\\\n"
-
-    script += """
 echo "Cleaning up..."
 apt-get clean
 rm -rf /var/lib/apt/lists/*
@@ -386,8 +381,15 @@ def sync_packages_from_device(
 
         if run_result.returncode != 0:
             print(f"❌ Package sync failed:")
-            print(run_result.stderr)
+            print(f"stdout: {run_result.stdout}")
+            print(f"stderr: {run_result.stderr}")
             raise RuntimeError("Package synchronization failed")
+
+        # Show output from sync
+        if run_result.stdout:
+            for line in run_result.stdout.split('\n'):
+                if line.strip():
+                    print(f"  {line}")
 
         print(f"✓ Synced {len(version_diffs)} packages to match device versions")
 
