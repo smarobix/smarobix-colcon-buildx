@@ -9,7 +9,7 @@ import subprocess
 import json
 import re
 from datetime import datetime
-from typing import Dict, Tuple, List, Set
+from typing import Dict, Tuple, Set
 from pathlib import Path
 
 
@@ -361,49 +361,39 @@ def sync_packages_from_device(
     # Generate sync script
     sync_script = generate_sync_script(version_diffs)
 
-    # Create temporary container and run sync script
-    print(f"\n🔄 Creating temporary container to sync packages...")
+    # Run sync in a container and keep it running so we can commit
+    print(f"\n🔄 Creating container and syncing packages...")
 
-    # Start container
-    container_create = subprocess.run(
-        ['docker', 'create', '--platform', 'linux/arm64', base_image, 'bash', '-c', sync_script],
-        capture_output=True,
-        text=True,
-        check=True
-    )
-    container_id = container_create.stdout.strip()
+    # Use docker run with a name so we can commit it afterward
+    # Run the sync script directly, container stays around after completion
+    container_name = f"buildx-sync-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     try:
-        # Copy sync script into container
-        script_process = subprocess.Popen(
-            ['docker', 'exec', '-i', container_id, 'bash', '-c',
-             'cat > /tmp/sync.sh && chmod +x /tmp/sync.sh'],
-            stdin=subprocess.PIPE
-        )
-        script_process.communicate(input=sync_script.encode())
-
-        # Start container
-        subprocess.run(['docker', 'start', container_id], check=True, capture_output=True)
-
-        # Run sync script
+        # Run sync script in container (don't use --rm so we can commit)
         print("📦 Installing synchronized packages...")
-        exec_result = subprocess.run(
-            ['docker', 'exec', container_id, 'bash', '/tmp/sync.sh'],
+        run_result = subprocess.run(
+            [
+                'docker', 'run',
+                '--name', container_name,
+                '--platform', 'linux/arm64',
+                base_image,
+                'bash', '-c', sync_script
+            ],
             capture_output=True,
             text=True,
-            timeout=300
+            timeout=600  # 10 minutes for package installation
         )
 
-        if exec_result.returncode != 0:
+        if run_result.returncode != 0:
             print(f"❌ Package sync failed:")
-            print(exec_result.stderr)
+            print(run_result.stderr)
             raise RuntimeError("Package synchronization failed")
 
         print(f"✓ Synced {len(version_diffs)} packages to match device versions")
 
         # Commit container to new image
         new_tag = generate_synced_tag(base_image)
-        commit_synced_image(container_id, new_tag)
+        commit_synced_image(container_name, new_tag)
 
         # Save manifest
         metadata = {
@@ -428,7 +418,9 @@ def sync_packages_from_device(
 
         return new_tag
 
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Package sync timed out after 10 minutes")
     finally:
         # Clean up container
-        subprocess.run(['docker', 'rm', '-f', container_id],
+        subprocess.run(['docker', 'rm', '-f', container_name],
                       capture_output=True, check=False)
