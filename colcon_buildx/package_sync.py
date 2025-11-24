@@ -204,6 +204,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades {upgrade_st
 
     if device_only_names:
         # Generate script that checks availability before installing
+        # Uses batch installation with fallback to individual packages on failure
         packages_list = " ".join(device_only_names)
         total_packages = len(device_only_names)
         script += f"""
@@ -238,7 +239,44 @@ fi
 
 if [ $AVAILABLE_COUNT -gt 0 ]; then
     echo "Installing $AVAILABLE_COUNT available device-only packages..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y $AVAILABLE_PACKAGES
+
+    # Try bulk install first - fastest option
+    set +e  # Don't exit on error
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $AVAILABLE_PACKAGES 2>&1
+    BULK_RESULT=$?
+    set -e
+
+    if [ $BULK_RESULT -ne 0 ]; then
+        echo "⚠ Bulk install failed, falling back to individual package installation..."
+        FAILED_PACKAGES=""
+        FAILED_COUNT=0
+        INSTALLED_COUNT=0
+        INSTALL_TOTAL=$AVAILABLE_COUNT
+
+        for pkg in $AVAILABLE_PACKAGES; do
+            INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+            if [ $((INSTALLED_COUNT % 25)) -eq 0 ]; then
+                echo "  Install progress: $INSTALLED_COUNT/$INSTALL_TOTAL packages..."
+            fi
+
+            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" > /dev/null 2>&1; then
+                FAILED_PACKAGES="$FAILED_PACKAGES $pkg"
+                FAILED_COUNT=$((FAILED_COUNT + 1))
+            fi
+        done
+
+        echo "  Install progress: $INSTALLED_COUNT/$INSTALL_TOTAL packages..."
+
+        if [ $FAILED_COUNT -gt 0 ]; then
+            echo "⚠ Failed to install $FAILED_COUNT packages (unmet dependencies or virtual):"
+            echo "  $FAILED_PACKAGES"
+        fi
+
+        SUCCESSFUL=$((INSTALL_TOTAL - FAILED_COUNT))
+        echo "✓ Successfully installed $SUCCESSFUL packages"
+    else
+        echo "✓ Bulk install completed successfully"
+    fi
 else
     echo "No device-only packages available in Docker repos"
 fi
@@ -450,6 +488,7 @@ def sync_packages_from_device(
             'Updating package',
             'Version-matching',
             'Progress:',
+            'Install progress:',
             'Availability check',
             'Skipping',
             'Installing',
@@ -459,6 +498,10 @@ def sync_packages_from_device(
             'Package sync complete',
             'available',
             'unavailable',
+            'Bulk install',
+            'falling back',
+            'Successfully installed',
+            'Failed to install',
         ]
 
         last_output = []  # Keep last few lines for error reporting

@@ -221,15 +221,17 @@ class BuildxVerb(VerbExtensionPoint):
                     use_base_image=use_base_image
                 )
 
-                # Sync from device if requested
+                # Sync from device if requested (standalone operation)
                 if hasattr(args, 'sync_from_device') and args.sync_from_device:
                     logger.info(f"📦 Syncing packages from device: {args.sync_from_device}")
                     synced_image = builder.create_synced_image(args.sync_from_device)
                     if not synced_image:
                         logger.error("❌ Failed to create synced image")
                         return 1
-                    # Update builder to use synced image
-                    builder.image = synced_image
+                    logger.info("✅ Package sync complete")
+                    logger.info("ℹ Next step: run 'colcon buildx' to build with synced image")
+                    # This is a standalone operation, exit after completion
+                    return 0
 
                 # Install dependencies if requested (with warning for Docker method)
                 if hasattr(args, 'install_deps') and args.install_deps:

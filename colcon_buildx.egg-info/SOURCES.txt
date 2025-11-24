@@ -1,5 +1,7 @@
+.buildx.conf.example
+.buildx.yml.example
+.gitignore
 .kria-build.conf.example
-INSTALLATION.md
 README.md
 install.sh
 pyproject.toml
@@ -8,6 +10,8 @@ setup.py
 bin/kria-build
 colcon_buildx/__init__.py
 colcon_buildx/deployment.py
+colcon_buildx/package_sync.py
+colcon_buildx/rosdep_manager.py
 colcon_buildx.egg-info/PKG-INFO
 colcon_buildx.egg-info/SOURCES.txt
 colcon_buildx.egg-info/dependency_links.txt
@@ -15,8 +19,11 @@ colcon_buildx.egg-info/entry_points.txt
 colcon_buildx.egg-info/not-zip-safe
 colcon_buildx.egg-info/requires.txt
 colcon_buildx.egg-info/top_level.txt
+colcon_buildx/__pycache__/__init__.cpython-312.pyc
 colcon_buildx/config/__init__.py
 colcon_buildx/docker/__init__.py
 colcon_buildx/sysroot/__init__.py
 colcon_buildx/verb/__init__.py
 colcon_buildx/verb/buildx.py
+colcon_buildx/verb/__pycache__/__init__.cpython-312.pyc
+colcon_buildx/verb/__pycache__/buildx.cpython-312.pyc
