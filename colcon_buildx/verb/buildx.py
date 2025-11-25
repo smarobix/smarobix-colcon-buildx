@@ -91,12 +91,20 @@ class BuildxVerb(VerbExtensionPoint):
         docker_group.add_argument(
             '--install-deps',
             action='store_true',
-            help='Install workspace dependencies using rosdep before build'
+            help='Install workspace dependencies using rosdep in Docker image (for dev only, see --install-deps-on-device)'
         )
         docker_group.add_argument(
             '--rosdep-args',
             default='--ignore-src -y',
             help='Additional arguments to pass to rosdep install (default: --ignore-src -y)'
+        )
+
+        # Device dependency installation
+        deps_group = parser.add_argument_group('Device Dependency Options')
+        deps_group.add_argument(
+            '--install-deps-on-device',
+            metavar='SSH_TARGET',
+            help='Install workspace dependencies on target device via SSH (e.g., ubuntu@kria). Recommended before --sync-from-device.'
         )
 
         # Deployment
@@ -137,6 +145,36 @@ class BuildxVerb(VerbExtensionPoint):
         logger.info(f"🔧 Cross-compilation method: {args.method}")
 
         try:
+            # Handle --install-deps-on-device (standalone operation, works with any method)
+            if hasattr(args, 'install_deps_on_device') and args.install_deps_on_device:
+                from colcon_buildx.rosdep_manager import install_deps_sshfs
+                from pathlib import Path
+
+                logger.info(f"📦 Installing workspace dependencies on device: {args.install_deps_on_device}")
+                rosdep_args = getattr(args, 'rosdep_args', '--ignore-src -y')
+
+                # Find workspace root
+                workspace_root = Path.cwd()
+                for _ in range(5):
+                    if (workspace_root / 'src').is_dir():
+                        break
+                    workspace_root = workspace_root.parent
+
+                success = install_deps_sshfs(
+                    args.install_deps_on_device,
+                    workspace_root,
+                    rosdep_args
+                )
+                if not success:
+                    logger.error("❌ Failed to install dependencies on device")
+                    return 1
+
+                logger.info("✅ Dependencies installed on device")
+                logger.info("ℹ Next step: run --sync-from-device to update Docker image")
+
+                # This is a standalone operation, exit after completion
+                return 0
+
             if args.method == 'sysroot':
                 # SSHFS-based cross-compilation
                 if not args.toolchain:
@@ -183,19 +221,27 @@ class BuildxVerb(VerbExtensionPoint):
                     use_base_image=use_base_image
                 )
 
-                # Sync from device if requested
+                # Sync from device if requested (standalone operation)
                 if hasattr(args, 'sync_from_device') and args.sync_from_device:
                     logger.info(f"📦 Syncing packages from device: {args.sync_from_device}")
                     synced_image = builder.create_synced_image(args.sync_from_device)
                     if not synced_image:
                         logger.error("❌ Failed to create synced image")
                         return 1
-                    # Update builder to use synced image
-                    builder.image = synced_image
+                    logger.info("✅ Package sync complete")
+                    logger.info("ℹ Next step: run 'colcon buildx' to build with synced image")
+                    # This is a standalone operation, exit after completion
+                    return 0
 
-                # Install dependencies if requested
+                # Install dependencies if requested (with warning for Docker method)
                 if hasattr(args, 'install_deps') and args.install_deps:
-                    logger.info(f"📦 Installing workspace dependencies...")
+                    logger.warning("⚠ Warning: --install-deps only installs dependencies in the Docker image.")
+                    logger.warning("  The target device will NOT have these dependencies installed.")
+                    logger.info("ℹ Recommended workflow:")
+                    logger.info("  1. colcon buildx --install-deps-on-device <device>")
+                    logger.info("  2. colcon buildx --sync-from-device <device>")
+                    logger.info("  3. colcon buildx")
+                    logger.info(f"📦 Installing workspace dependencies in Docker image...")
                     rosdep_args = getattr(args, 'rosdep_args', '--ignore-src -y')
                     updated_image = builder.install_dependencies(rosdep_args)
                     if not updated_image:

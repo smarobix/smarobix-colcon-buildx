@@ -93,45 +93,41 @@ colcon buildx --deploy
 
 ## Package Synchronization
 
-The tool provides two mechanisms to keep packages synchronized (between Docker image and target):
+The tool provides mechanisms to keep packages synchronized between your Docker image and target device.
 
-### 1. Device-Synced Docker Images (Recommended)
+### Recommended Workflow
 
-Sync package versions from your target device to create a locally-committed Docker image:
+The **device is the source of truth**. This workflow ensures your Docker build environment matches your target device's package versions.
+
+**⚠️ IMPORTANT - Update Device First:**
+
+Before syncing, **always** update your target device to ensure package versions are current:
 
 ```bash
-# Create synced image from device
-colcon buildx --sync-from-device ubuntu@192.168.1.100
+# SSH to device and update
+ssh ubuntu@kria-vision
+sudo apt-get update && sudo apt-get upgrade -y
+exit
+```
 
-# This creates a local image: <original-tag>-synced-20250120
-# Future builds automatically use the synced image
+**Then follow this workflow:**
+
+```bash
+# Step 1: Install workspace dependencies on target device
+colcon buildx --install-deps-on-device ubuntu@kria-vision
+
+# Step 2: Sync Docker image to match device packages
+colcon buildx --sync-from-device ubuntu@kria-vision
+
+# Step 3: Build with synchronized environment
 colcon buildx
-
-# Output:
-# ℹ Using synced image: jazzy-base-synced-20250120 (synced on 2025-01-20)
-# ℹ Run with --use-base-image to use original base image instead
 ```
 
-### 2. Automatic Dependency Installation
-
-Install ROS package dependencies from your workspace using rosdep:
-
-```bash
-# Docker method: installs deps in container, creates synced image
-colcon buildx --install-deps
-
-# SSHFS method: installs deps on target device via SSH
-colcon buildx --method sysroot --sysroot-host kria --install-deps
-
-colcon buildx --install-deps --rosdep-args "--ignore-src -y --skip-keys=python3-numpy"
-```
-
-### Package Sync Details
-
-**Packages that differ:**
-- **Common packages** (in both image and device): Version-matched
-- **Device-only packages**: Ignored (not installed in image)
-- **Image-only packages**: Ignored (not removed from image)
+**What happens during sync:**
+- Compares package versions between device and Docker image
+- Creates a new Docker image with packages matching your device
+- Generates detailed sync report in `cross_log/sync-packages-*.log`
+- Auto-detects and uses synced images in future builds
 
 ## Build Methods
 
@@ -240,22 +236,24 @@ colcon buildx
 colcon buildx --packages-select my_package another_package
 ```
 
-### Build with Package Sync
+### Build with Package Sync (Recommended Workflow)
 
 ```bash
-# First-time setup: sync from device
-colcon buildx --sync-from-device ubuntu@192.168.1.100
+# Step 0: Update device first (IMPORTANT!)
+ssh ubuntu@kria-vision
+sudo apt-get update && sudo apt-get upgrade -y
+exit
 
-# Install dependencies
-colcon buildx --install-deps
+# Step 1: Install workspace dependencies on target device
+colcon buildx --install-deps-on-device ubuntu@kria-vision
 
-# Or do both at once
-colcon buildx --sync-from-device ubuntu@kria --install-deps
+# Step 2: Sync Docker image to match device
+colcon buildx --sync-from-device ubuntu@kria-vision
 
-# Normal builds (auto-uses synced image)
+# Step 3: Build (auto-uses synced image)
 colcon buildx
 
-# Force using original base image
+# Force using original base image if needed
 colcon buildx --use-base-image
 ```
 
@@ -384,17 +382,26 @@ cp kria_ros_cross_compile/.buildx.conf.example .buildx.conf
 
 ### "Package sync failed" or SSH connection issues
 
-**Cause:** Cannot connect to target device via SSH.
+**Cause:** Cannot connect to target device via SSH, or device packages are outdated.
 
 **Solution:**
 ```bash
 # Test SSH connection first
-ssh ubuntu@192.168.1.100
+ssh ubuntu@kria-vision
 
 # Ensure passwordless SSH is set up
-ssh-copy-id ubuntu@192.168.1.100
+ssh-copy-id ubuntu@kria-vision
 
-# Check firewall settings on device
+# IMPORTANT: Update device packages before syncing
+ssh ubuntu@kria-vision
+sudo apt-get update && sudo apt-get upgrade -y
+exit
+
+# Then retry sync
+colcon buildx --sync-from-device ubuntu@kria-vision
+
+# Check detailed sync log for package issues
+cat cross_log/sync-packages-*.log
 ```
 
 ### Synced image not being used
@@ -406,11 +413,15 @@ ssh-copy-id ubuntu@192.168.1.100
 # List Docker images to verify synced image exists
 docker images | grep synced
 
+# Check sync manifest and logs
+cat .buildx-sync-manifest.json
+ls -lh cross_log/sync-packages-*.log
+
 # Manually specify to use base image if needed
 colcon buildx --use-base-image
 
 # Re-sync if image was accidentally deleted
-colcon buildx --sync-from-device ubuntu@kria
+colcon buildx --sync-from-device ubuntu@kria-vision
 ```
 
 ### rosdep install fails
