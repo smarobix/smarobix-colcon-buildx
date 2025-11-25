@@ -19,11 +19,8 @@ colcon_buildx.egg-info/entry_points.txt
 colcon_buildx.egg-info/not-zip-safe
 colcon_buildx.egg-info/requires.txt
 colcon_buildx.egg-info/top_level.txt
-colcon_buildx/__pycache__/__init__.cpython-312.pyc
 colcon_buildx/config/__init__.py
 colcon_buildx/docker/__init__.py
 colcon_buildx/sysroot/__init__.py
 colcon_buildx/verb/__init__.py
 colcon_buildx/verb/buildx.py
-colcon_buildx/verb/__pycache__/__init__.cpython-312.pyc
-colcon_buildx/verb/__pycache__/buildx.cpython-312.pyc

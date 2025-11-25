@@ -187,6 +187,12 @@ def generate_sync_script(
     # Build list of device-only packages (just names for availability check)
     device_only_names = list(device_only_pkgs.keys())
 
+    # Build version mapping as bash variable (format: "pkg1|version1 pkg2|version2")
+    version_map_entries = []
+    for name, pkg_info in device_only_pkgs.items():
+        version_map_entries.append(f"{name}|{pkg_info.version}")
+    version_map_str = " ".join(version_map_entries)
+
     script = """#!/bin/bash
 set -e
 
@@ -210,12 +216,26 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades {upgrade_st
         script += f"""
 echo "Checking availability of {total_packages} device-only packages..."
 DEVICE_ONLY_PACKAGES="{packages_list}"
+VERSION_MAP="{version_map_str}"
 AVAILABLE_PACKAGES=""
 UNAVAILABLE_PACKAGES=""
 AVAILABLE_COUNT=0
 UNAVAILABLE_COUNT=0
 CHECKED_COUNT=0
 TOTAL_COUNT={total_packages}
+
+# Function to get version for a package from VERSION_MAP
+get_version() {{
+    local pkg=$1
+    for entry in $VERSION_MAP; do
+        IFS='|' read -r p v <<< "$entry"
+        if [ "$p" = "$pkg" ]; then
+            echo "$v"
+            return
+        fi
+    done
+    echo "unknown"
+}}
 
 for pkg in $DEVICE_ONLY_PACKAGES; do
     CHECKED_COUNT=$((CHECKED_COUNT + 1))
@@ -228,6 +248,9 @@ for pkg in $DEVICE_ONLY_PACKAGES; do
     else
         UNAVAILABLE_PACKAGES="$UNAVAILABLE_PACKAGES $pkg"
         UNAVAILABLE_COUNT=$((UNAVAILABLE_COUNT + 1))
+        # Output with version
+        PKG_VERSION=$(get_version "$pkg")
+        echo "SYNC_UNAVAILABLE_PKG:$pkg|$PKG_VERSION"
     fi
 done
 
@@ -253,23 +276,43 @@ if [ $AVAILABLE_COUNT -gt 0 ]; then
         INSTALLED_COUNT=0
         INSTALL_TOTAL=$AVAILABLE_COUNT
 
+        # Don't exit on errors for individual package installation
+        set +e
+
         for pkg in $AVAILABLE_PACKAGES; do
             INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
             if [ $((INSTALLED_COUNT % 25)) -eq 0 ]; then
                 echo "  Install progress: $INSTALLED_COUNT/$INSTALL_TOTAL packages..."
             fi
 
-            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" > /dev/null 2>&1; then
+            PKG_VERSION=$(get_version "$pkg")
+            INSTALL_OUTPUT=$(DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" 2>&1)
+            INSTALL_RESULT=$?
+
+            if [ $INSTALL_RESULT -ne 0 ]; then
                 FAILED_PACKAGES="$FAILED_PACKAGES $pkg"
                 FAILED_COUNT=$((FAILED_COUNT + 1))
+                # Extract the error reason (last non-empty line or E: line)
+                ERROR_REASON=$(echo "$INSTALL_OUTPUT" | grep -E "^E:|Unable to|has no installation|dependency|held|unmet" | tail -1 | sed 's/^E: //')
+                if [ -z "$ERROR_REASON" ]; then
+                    ERROR_REASON="Unknown error"
+                fi
+                # Output parseable marker for Python to capture (pkg|version|reason format)
+                echo "SYNC_FAILED_PKG:$pkg|$PKG_VERSION|$ERROR_REASON"
+            else
+                # Output marker for successfully installed package
+                echo "SYNC_INSTALLED_PKG:$pkg|$PKG_VERSION"
             fi
         done
 
         echo "  Install progress: $INSTALLED_COUNT/$INSTALL_TOTAL packages..."
 
+        # Re-enable exit on error for rest of script
+        set -e
+
         if [ $FAILED_COUNT -gt 0 ]; then
-            echo "⚠ Failed to install $FAILED_COUNT packages (unmet dependencies or virtual):"
-            echo "  $FAILED_PACKAGES"
+            echo "⚠ Failed to install $FAILED_COUNT packages (unmet dependencies or virtual)"
+            echo "SYNC_STATS:failed=$FAILED_COUNT,success=$((INSTALL_TOTAL - FAILED_COUNT))"
         fi
 
         SUCCESSFUL=$((INSTALL_TOTAL - FAILED_COUNT))
@@ -505,6 +548,10 @@ def sync_packages_from_device(
         ]
 
         last_output = []  # Keep last few lines for error reporting
+        unavailable_packages = []  # [(pkg, version)]
+        failed_packages = []  # [(pkg, version, reason)]
+        installed_packages = []  # [(pkg, version)]
+        sync_stats = {}  # Track install statistics
 
         try:
             for line in iter(process.stdout.readline, ''):
@@ -514,6 +561,38 @@ def sync_packages_from_device(
                 last_output.append(line)
                 if len(last_output) > 20:
                     last_output.pop(0)
+
+                # Parse special markers
+                if line.startswith('SYNC_UNAVAILABLE_PKG:'):
+                    data = line.split(':', 1)[1]
+                    if '|' in data:
+                        pkg, version = data.split('|', 1)
+                        unavailable_packages.append((pkg, version))
+                    continue
+                elif line.startswith('SYNC_FAILED_PKG:'):
+                    data = line.split(':', 1)[1]
+                    parts = data.split('|')
+                    if len(parts) >= 3:
+                        pkg, version, reason = parts[0], parts[1], '|'.join(parts[2:])
+                    elif len(parts) == 2:
+                        pkg, version, reason = parts[0], parts[1], "Unknown error"
+                    else:
+                        pkg, version, reason = parts[0], "unknown", "Unknown error"
+                    failed_packages.append((pkg, version, reason))
+                    continue
+                elif line.startswith('SYNC_INSTALLED_PKG:'):
+                    data = line.split(':', 1)[1]
+                    if '|' in data:
+                        pkg, version = data.split('|', 1)
+                        installed_packages.append((pkg, version))
+                    continue
+                elif line.startswith('SYNC_STATS:'):
+                    # Parse stats like "failed=10,success=20"
+                    stats_str = line.split(':', 1)[1]
+                    for pair in stats_str.split(','):
+                        k, v = pair.split('=')
+                        sync_stats[k] = int(v)
+                    continue
 
                 # Show lines that indicate progress
                 if any(kw in line for kw in progress_keywords):
@@ -535,27 +614,89 @@ def sync_packages_from_device(
                 print(f"  {line}")
             raise RuntimeError("Package synchronization failed")
 
-        # Summary message
+        # Calculate stats
+        installed_count = len(installed_packages)
+        failed_count = len(failed_packages)
+        unavailable_count = len(unavailable_packages)
+
+        # Summary message with actual stats
         if version_diffs:
             print(f"✓ Version-matched {len(version_diffs)} packages")
         if device_only:
-            print(f"✓ Installed {len(device_only)} device-only packages")
+            print(f"✓ Device-only packages: {installed_count} installed, {failed_count} failed, {unavailable_count} unavailable")
+
+        # Save detailed log to cross_log directory
+        log_dir = manifest_path.parent / 'cross_log'
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / f"sync-packages-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+
+        with open(log_file, 'w') as f:
+            f.write(f"Package Sync Report\n")
+            f.write(f"{'='*60}\n")
+            f.write(f"Date: {datetime.now().isoformat()}\n")
+            f.write(f"Device: {ssh_target}\n")
+            f.write(f"Base Image: {base_image}\n\n")
+
+            f.write(f"Summary:\n")
+            f.write(f"  - Version-matched: {len(version_diffs)}\n")
+            f.write(f"  - Device-only attempted: {len(device_only)}\n")
+            f.write(f"  - Successfully installed: {installed_count}\n")
+            f.write(f"  - Failed to install: {failed_count}\n")
+            f.write(f"  - Unavailable in repos: {unavailable_count}\n\n")
+
+            # Version-matched packages
+            if version_diffs:
+                f.write(f"Version-Matched Packages ({len(version_diffs)}):\n")
+                f.write(f"{'='*60}\n")
+                for name, (device_pkg, image_pkg) in sorted(version_diffs.items()):
+                    f.write(f"  {name}:{image_pkg.version}->{device_pkg.version}\n")
+                f.write("\n")
+
+            # Successfully installed packages
+            if installed_packages:
+                f.write(f"Successfully Installed ({len(installed_packages)}):\n")
+                f.write(f"{'='*60}\n")
+                for pkg, version in sorted(installed_packages, key=lambda x: x[0]):
+                    f.write(f"  {pkg}:{version}\n")
+                f.write("\n")
+
+            # Unavailable packages
+            if unavailable_packages:
+                f.write(f"Unavailable Packages ({len(unavailable_packages)}):\n")
+                f.write(f"{'='*60}\n")
+                for pkg, version in sorted(unavailable_packages, key=lambda x: x[0]):
+                    f.write(f"  {pkg}:{version}\n")
+                f.write("\n")
+
+            # Failed packages with reasons
+            if failed_packages:
+                f.write(f"Failed Packages ({len(failed_packages)}):\n")
+                f.write(f"{'='*60}\n")
+                for pkg, version, reason in sorted(failed_packages, key=lambda x: x[0]):
+                    f.write(f"  {pkg}:{version} - {reason}\n")
+                f.write("\n")
+
+        print(f"📝 Detailed sync log saved to: {log_file}")
 
         # Commit container to new image
         new_tag = generate_synced_tag(base_image)
         commit_synced_image(container_name, new_tag)
 
-        # Save manifest
+        # Save manifest with actual stats
         metadata = {
             "base_image": base_image,
             "synced_image": new_tag,
             "created_date": datetime.now().isoformat(),
+            "sync_log": str(log_file),
             "operations": [{
                 "type": "device-sync",
                 "source": ssh_target,
                 "timestamp": datetime.now().isoformat(),
                 "packages_version_matched": len(version_diffs),
-                "packages_installed": len(device_only),
+                "packages_device_only": len(device_only),
+                "packages_installed": installed_count,
+                "packages_failed": failed_count,
+                "packages_unavailable": unavailable_count,
                 "packages_image_only": len(image_only)
             }]
         }
