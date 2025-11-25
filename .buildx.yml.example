@@ -5,7 +5,7 @@
 method: docker
 
 # Docker Method Configuration
-docker_image: git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+docker_image: sapertuz/smrbx-buildx:kv26-jazzy
 docker_platform: linux/arm64
 
 # SSHFS Sysroot Method (alternative - uncomment to use)
@@ -21,7 +21,7 @@ install_base: cross_install
 
 # Deployment
 deploy: false
-deploy_target: ubuntu@kria-vision-home:~/ros2_ws/install/
+deploy_target: ubuntu@10.42.0.3:~/ros2_ws/install/
 
 # Additional colcon arguments
 # colcon_args:

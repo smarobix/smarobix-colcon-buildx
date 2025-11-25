@@ -435,15 +435,16 @@ def generate_synced_tag(base_image: str) -> str:
     Generate a synced image tag from base image name.
 
     Args:
-        base_image: Original image name (e.g., 'registry.com/ros:jazzy-base')
+        base_image: Original image name (e.g., 'registry.com/ros:jazzy-base' or 'kv26:jazzy-base')
 
     Returns:
-        New tag with -synced-YYYYMMDD suffix (e.g., 'jazzy-base-synced-20250120')
+        New full image name with -synced-YYYYMMDD suffix (e.g., 'kv26:jazzy-base-synced-20251125')
     """
-    # Extract just the tag portion after last colon
+    # Extract repository and tag portions
     if ':' in base_image:
-        base_tag = base_image.split(':')[-1]
+        repository, base_tag = base_image.rsplit(':', 1)
     else:
+        repository = None
         base_tag = base_image
 
     # Remove existing -synced-* suffix if present
@@ -451,7 +452,13 @@ def generate_synced_tag(base_image: str) -> str:
 
     # Add new synced suffix with current date
     date_str = datetime.now().strftime('%Y%m%d')
-    return f"{base_tag}-synced-{date_str}"
+    synced_tag = f"{base_tag}-synced-{date_str}"
+
+    # Return full image name with repository
+    if repository:
+        return f"{repository}:{synced_tag}"
+    else:
+        return synced_tag
 
 
 def sync_packages_from_device(

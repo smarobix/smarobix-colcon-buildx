@@ -71,6 +71,13 @@ class DockerBuilder:
         # Search for synced images matching pattern
         pattern = f"{base_tag_clean}-synced-*"
 
+        logger.debug(f"🔍 Searching for synced images...")
+        logger.debug(f"   Base image: {self.base_image}")
+        logger.debug(f"   Registry/repo: {registry_and_repo}")
+        logger.debug(f"   Base tag: {base_tag}")
+        logger.debug(f"   Clean tag: {base_tag_clean}")
+        logger.debug(f"   Pattern: {pattern}")
+
         try:
             result = subprocess.run(
                 ['docker', 'images', '--format', '{{.Repository}}:{{.Tag}}'],
@@ -88,7 +95,12 @@ class DockerBuilder:
                 if ':' in line:
                     repo, tag = line.rsplit(':', 1)
                     # Match against base tag pattern
-                    if re.match(f"{re.escape(base_tag_clean)}-synced-\\d{{8}}$", tag):
+                    regex_pattern = f"{re.escape(base_tag_clean)}-synced-\\d{{8}}$"
+                    is_match = re.match(regex_pattern, tag)
+
+                    logger.debug(f"   Checking: {line} → repo={repo}, tag={tag}, pattern={regex_pattern}, match={bool(is_match)}")
+
+                    if is_match:
                         synced_images.append((tag, line))
 
             if synced_images:
@@ -107,17 +119,19 @@ class DockerBuilder:
                 except:
                     formatted_date = date_str
 
-                logger.info(f"ℹ Using synced image: {newest_tag} (synced on {formatted_date})")
-                logger.info(f"ℹ Run with --use-base-image to use original base image instead")
+                print(f"ℹ️  Using synced image: {newest_image}")
+                print(f"   Synced on: {formatted_date}")
+                logger.info(f"ℹ️  Run with --use-base-image to use original base image instead")
 
                 return newest_image
 
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
+            logger.debug(f"Failed to list docker images: {e}")
             pass
 
         # No synced image found
-        logger.info(f"ℹ Using base image: {self.base_image}")
-        logger.info(f"ℹ Run --sync-from-device <target> to create synced version")
+        print(f"ℹ️  Using base image: {self.base_image}")
+        logger.info(f"ℹ️  Run --sync-from-device <target> to create synced version")
         return self.base_image
 
     def create_synced_image(self, ssh_target):
@@ -191,14 +205,21 @@ class DockerBuilder:
         # Try to inspect the image
         result = subprocess.run(
             ['docker', 'image', 'inspect', self.image],
-            capture_output=True
+            capture_output=True,
+            text=True
         )
 
+        logger.debug(f"   docker inspect return code: {result.returncode}")
+        if result.returncode != 0:
+            logger.debug(f"   stderr: {result.stderr}")
+            logger.debug(f"   stdout: {result.stdout}")
+
         if result.returncode == 0:
-            logger.info(f"✓ Image found locally: {self.image}")
+            print(f"✓ Image found locally")
             return True
 
         # Image not found locally, try to pull
+        logger.warning(f"⚠️  Image not found locally, attempting to pull...")
         logger.info(f"📥 Pulling image: {self.image}")
         logger.info(f"   Platform: {self.platform}")
 
@@ -211,7 +232,6 @@ class DockerBuilder:
             return True
         except subprocess.CalledProcessError as e:
             logger.error(f"❌ Failed to pull image: {self.image}")
-            logger.error("💡 Ensure you're logged in: docker login git.smarobox.de:5050")
             logger.error(f"💡 Check image name and tag are correct")
             return False
 

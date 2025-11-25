@@ -53,11 +53,8 @@ docker run --rm --platform linux/arm64 alpine uname -m
 **Authenticate and pull Docker image:**
 
 ```bash
-# Login to GitLab registry
-docker login git.smarobox.de:5050
-
 # Pull the image (after enabling QEMU if on x86_64)
-docker pull --platform linux/arm64 git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+docker pull --platform linux/arm64 sapertuz/smrbx-buildx:kv26-jazzy
 ```
 
 ## Quick Start
@@ -69,8 +66,8 @@ In your ROS 2 workspace root, create `.buildx.conf`:
 ```bash
 # Docker method (recommended)
 method = docker
-docker_image = git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
-deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
+docker_image = sapertuz/smrbx-buildx:kv26-jazzy
+deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
 
 ### 2. Build
@@ -105,7 +102,7 @@ Before syncing, **always** update your target device to ensure package versions 
 
 ```bash
 # SSH to device and update
-ssh ubuntu@kria-vision
+ssh ubuntu@10.42.0.3
 sudo apt-get update && sudo apt-get upgrade -y
 exit
 ```
@@ -114,10 +111,10 @@ exit
 
 ```bash
 # Step 1: Install workspace dependencies on target device
-colcon buildx --install-deps-on-device ubuntu@kria-vision
+colcon buildx --install-deps-on-device ubuntu@10.42.0.3
 
 # Step 2: Sync Docker image to match device packages
-colcon buildx --sync-from-device ubuntu@kria-vision
+colcon buildx --sync-from-device ubuntu@10.42.0.3
 
 # Step 3: Build with synchronized environment
 colcon buildx
@@ -140,7 +137,7 @@ Uses pre-built Docker containers for cross-compilation.
 ```bash
 # .buildx.conf
 method = docker
-docker_image = git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+docker_image = sapertuz/smrbx-buildx:kv26-jazzy
 docker_platform = linux/arm64
 build_base = cross_build
 install_base = cross_install
@@ -150,7 +147,7 @@ install_base = cross_install
 
 ```bash
 colcon buildx --method docker \
-  --docker-image git.smarobox.de:5050/.../jazzy-base
+  --docker-image sapertuz/smrbx-buildx:kv26-jazzy
 ```
 
 ### SSHFS Sysroot Method
@@ -165,7 +162,7 @@ method = sysroot
 sysroot_host = kria-vision-home
 sysroot_mount = ~/mnt/kria-sysroot
 toolchain = toolchainfile.cmake
-deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
+deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
 
 **Usage:**
@@ -185,7 +182,7 @@ colcon buildx --method sysroot \
 method = docker
 
 # Docker settings
-docker_image = git.smarobox.de:5050/.../jazzy-base
+docker_image = sapertuz/smrbx-buildx:kv26-jazzy
 docker_platform = linux/arm64
 
 # Build directories
@@ -194,7 +191,7 @@ install_base = cross_install
 
 # Deployment
 deploy = false
-deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
+deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
 
 ### Format 2: YAML (.buildx.yml)
@@ -204,7 +201,7 @@ deploy_target = ubuntu@kria-vision-home:~/ros2_ws/install/
 method: docker
 
 # Docker settings
-docker_image: git.smarobox.de:5050/.../jazzy-base
+docker_image: sapertuz/smrbx-buildx:kv26-jazzy
 docker_platform: linux/arm64
 
 # Build directories
@@ -213,7 +210,7 @@ install_base: cross_install
 
 # Deployment
 deploy: false
-deploy_target: ubuntu@kria-vision-home:~/ros2_ws/install/
+deploy_target: ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
 
 ### Configuration Priority
@@ -240,15 +237,15 @@ colcon buildx --packages-select my_package another_package
 
 ```bash
 # Step 0: Update device first (IMPORTANT!)
-ssh ubuntu@kria-vision
+ssh ubuntu@10.42.0.3
 sudo apt-get update && sudo apt-get upgrade -y
 exit
 
 # Step 1: Install workspace dependencies on target device
-colcon buildx --install-deps-on-device ubuntu@kria-vision
+colcon buildx --install-deps-on-device ubuntu@10.42.0.3
 
 # Step 2: Sync Docker image to match device
-colcon buildx --sync-from-device ubuntu@kria-vision
+colcon buildx --sync-from-device ubuntu@10.42.0.3
 
 # Step 3: Build (auto-uses synced image)
 colcon buildx
@@ -387,18 +384,18 @@ cp kria_ros_cross_compile/.buildx.conf.example .buildx.conf
 **Solution:**
 ```bash
 # Test SSH connection first
-ssh ubuntu@kria-vision
+ssh ubuntu@10.42.0.3
 
 # Ensure passwordless SSH is set up
-ssh-copy-id ubuntu@kria-vision
+ssh-copy-id ubuntu@10.42.0.3
 
 # IMPORTANT: Update device packages before syncing
-ssh ubuntu@kria-vision
+ssh ubuntu@10.42.0.3
 sudo apt-get update && sudo apt-get upgrade -y
 exit
 
 # Then retry sync
-colcon buildx --sync-from-device ubuntu@kria-vision
+colcon buildx --sync-from-device ubuntu@10.42.0.3
 
 # Check detailed sync log for package issues
 cat cross_log/sync-packages-*.log
@@ -421,7 +418,7 @@ ls -lh cross_log/sync-packages-*.log
 colcon buildx --use-base-image
 
 # Re-sync if image was accidentally deleted
-colcon buildx --sync-from-device ubuntu@kria-vision
+colcon buildx --sync-from-device ubuntu@10.42.0.3
 ```
 
 ### rosdep install fails
@@ -433,7 +430,7 @@ colcon buildx --sync-from-device ubuntu@kria-vision
 # For Docker method: the tool handles rosdep init automatically
 
 # For SSHFS method: initialize rosdep on device
-ssh ubuntu@kria
+ssh ubuntu@10.42.0.3
 sudo rosdep init
 rosdep update
 
@@ -441,16 +438,6 @@ rosdep update
 ```
 
 ## Advanced Usage
-
-### Custom Images
-
-```bash
-# Use Humble instead of Jazzy
-colcon buildx --docker-image git.smarobox.de:5050/.../humble-base
-
-# Use specific commit
-colcon buildx --docker-image git.smarobox.de:5050/.../jazzy-base-abc1234
-```
 
 ### Container Management
 

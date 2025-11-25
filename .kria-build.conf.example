@@ -3,7 +3,7 @@
 
 # Docker image to use for building
 # Auto-detected ROS distribution from image name (jazzy, humble, etc.)
-KRIA_IMAGE=git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base
+KRIA_IMAGE=sapertuz/smrbx-buildx:kv26-jazzy
 
 # Default sync target (can be overridden with --sync-to)
 # Format: user@host:/path/to/install
