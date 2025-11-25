@@ -196,6 +196,37 @@ def generate_sync_script(
     script = """#!/bin/bash
 set -e
 
+# Progress bar function with two colors (ASCII-safe)
+show_progress_bar() {
+    local installed=$1
+    local failed=$2
+    local total=$3
+    local width=50
+
+    local processed=$((installed + failed))
+    local installed_width=$((installed * width / total))
+    local failed_width=$((failed * width / total))
+    local remaining_width=$((width - installed_width - failed_width))
+
+    # Build the bar with ASCII characters
+    local bar=""
+    # Green for installed
+    if [ $installed_width -gt 0 ]; then
+        bar="$bar\\e[42m$(printf '%*s' $installed_width | tr ' ' '#')\\e[0m"
+    fi
+    # Red for failed
+    if [ $failed_width -gt 0 ]; then
+        bar="$bar\\e[41m$(printf '%*s' $failed_width | tr ' ' '#')\\e[0m"
+    fi
+    # Gray for remaining
+    if [ $remaining_width -gt 0 ]; then
+        bar="$bar\\e[100m$(printf '%*s' $remaining_width | tr ' ' '-')\\e[0m"
+    fi
+
+    # Output with PROGRESS_BAR marker for Python to detect
+    printf "PROGRESS_BAR:[%b] %d/%d (\\e[32m%d ok\\e[0m \\e[31m%d fail\\e[0m)\\n" "$bar" "$processed" "$total" "$installed" "$failed"
+}
+
 echo "Updating package lists..."
 apt-get update -qq
 
@@ -239,9 +270,6 @@ get_version() {{
 
 for pkg in $DEVICE_ONLY_PACKAGES; do
     CHECKED_COUNT=$((CHECKED_COUNT + 1))
-    if [ $((CHECKED_COUNT % 25)) -eq 0 ] || [ $CHECKED_COUNT -eq $TOTAL_COUNT ]; then
-        echo "  Progress: $CHECKED_COUNT/$TOTAL_COUNT packages checked..."
-    fi
     if apt-cache show "$pkg" > /dev/null 2>&1; then
         AVAILABLE_PACKAGES="$AVAILABLE_PACKAGES $pkg"
         AVAILABLE_COUNT=$((AVAILABLE_COUNT + 1))
@@ -252,8 +280,12 @@ for pkg in $DEVICE_ONLY_PACKAGES; do
         PKG_VERSION=$(get_version "$pkg")
         echo "SYNC_UNAVAILABLE_PKG:$pkg|$PKG_VERSION"
     fi
+    # Show progress bar
+    show_progress_bar $AVAILABLE_COUNT $UNAVAILABLE_COUNT $TOTAL_COUNT
 done
 
+# Clear progress bar and show final result
+printf "\\n"
 echo "Availability check complete: $AVAILABLE_COUNT available, $UNAVAILABLE_COUNT unavailable"
 
 if [ $UNAVAILABLE_COUNT -gt 0 ]; then
@@ -279,12 +311,9 @@ if [ $AVAILABLE_COUNT -gt 0 ]; then
         # Don't exit on errors for individual package installation
         set +e
 
-        for pkg in $AVAILABLE_PACKAGES; do
-            INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
-            if [ $((INSTALLED_COUNT % 25)) -eq 0 ]; then
-                echo "  Install progress: $INSTALLED_COUNT/$INSTALL_TOTAL packages..."
-            fi
+        SUCCESSFUL_COUNT=0
 
+        for pkg in $AVAILABLE_PACKAGES; do
             PKG_VERSION=$(get_version "$pkg")
             INSTALL_OUTPUT=$(DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$pkg" 2>&1)
             INSTALL_RESULT=$?
@@ -300,12 +329,17 @@ if [ $AVAILABLE_COUNT -gt 0 ]; then
                 # Output parseable marker for Python to capture (pkg|version|reason format)
                 echo "SYNC_FAILED_PKG:$pkg|$PKG_VERSION|$ERROR_REASON"
             else
+                SUCCESSFUL_COUNT=$((SUCCESSFUL_COUNT + 1))
                 # Output marker for successfully installed package
                 echo "SYNC_INSTALLED_PKG:$pkg|$PKG_VERSION"
             fi
+
+            # Update progress bar
+            show_progress_bar $SUCCESSFUL_COUNT $FAILED_COUNT $INSTALL_TOTAL
         done
 
-        echo "  Install progress: $INSTALLED_COUNT/$INSTALL_TOTAL packages..."
+        # Clear progress bar and show final result
+        printf "\\n"
 
         # Re-enable exit on error for rest of script
         set -e
@@ -523,6 +557,8 @@ def sync_packages_from_device(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding='utf-8',
+            errors='replace',  # Replace invalid UTF-8 bytes
             bufsize=1  # Line buffered
         )
 
@@ -594,13 +630,26 @@ def sync_packages_from_device(
                         sync_stats[k] = int(v)
                     continue
 
-                # Show lines that indicate progress
-                if any(kw in line for kw in progress_keywords):
-                    # Truncate long lines
-                    if len(line) > 100:
-                        line = line[:97] + "..."
-                    print(f"  {line}")
-                    sys.stdout.flush()
+                # Handle progress bar lines
+                if line.startswith('PROGRESS_BAR:'):
+                    # Extract the progress bar content (after the marker)
+                    bar_content = line[13:]  # Skip "PROGRESS_BAR:"
+                    # Print with carriage return for in-place update
+                    print(f'\r  {bar_content}', end='', flush=True)
+                    continue
+                # Show other lines that indicate progress
+                elif any(kw in line for kw in progress_keywords):
+                    # Clear any progress bar first, then show message
+                    if line.strip():  # Only print non-empty lines
+                        print('\r' + ' ' * 80 + '\r', end='')  # Clear line
+                        # Truncate long lines
+                        if len(line) > 100:
+                            line = line[:97] + "..."
+                        print(f"  {line}")
+                        sys.stdout.flush()
+                    else:
+                        # Empty line - just clear the progress bar
+                        print('\r' + ' ' * 80 + '\r')
 
             process.wait(timeout=3600)  # 60 minutes timeout
 
