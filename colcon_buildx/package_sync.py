@@ -196,34 +196,61 @@ def generate_sync_script(
     script = """#!/bin/bash
 set -e
 
-# Progress bar function with two colors (ASCII-safe)
+# Progress bar with UTF-8 blocks
 show_progress_bar() {
     local installed=$1
     local failed=$2
     local total=$3
-    local width=50
+    local width=40
+
+    # DEBUG
+    echo "PROGRESS_BAR:DEBUG called with installed=$installed failed=$failed total=$total"
+
+    # Block characters array: ▏ ▎ ▍ ▌ ▋ ▊ ▉ █
+    # Embed UTF-8 directly for maximum compatibility
+    local -a BLOCKS=('▏' '▎' '▍' '▌' '▋' '▊' '▉' '█')
+
+    # Calculate widths in eighths for smooth rendering
+    local total_eighths=$((width * 8))
+    local installed_eighths=$((installed * total_eighths / total))
+    local failed_eighths=$((failed * total_eighths / total))
+
+    # Calculate character counts
+    local installed_chars=$((installed_eighths / 8))
+    local installed_partial=$((installed_eighths % 8))
+    [ $installed_partial -gt 0 ] && installed_chars=$((installed_chars + 1))
+
+    local failed_chars=$((failed_eighths / 8))
+    local failed_partial=$((failed_eighths % 8))
+    [ $failed_partial -gt 0 ] && failed_chars=$((failed_chars + 1))
+
+    local remaining_chars=$((width - installed_chars - failed_chars))
+
+    # Build installed bar (full blocks + partial)
+    local installed_bar=""
+    local i
+    for ((i=0; i<$((installed_eighths / 8)); i++)); do
+        installed_bar="${installed_bar}${BLOCKS[7]}"  # Full block █
+    done
+    [ $installed_partial -gt 0 ] && installed_bar="${installed_bar}${BLOCKS[$((installed_partial-1))]}"
+
+    # Build failed bar (full blocks + partial)
+    local failed_bar=""
+    for ((i=0; i<$((failed_eighths / 8)); i++)); do
+        failed_bar="${failed_bar}${BLOCKS[7]}"  # Full block █
+    done
+    [ $failed_partial -gt 0 ] && failed_bar="${failed_bar}${BLOCKS[$((failed_partial-1))]}"
+
+    # Build remaining bar (spaces)
+    local remaining_bar=$(printf '%*s' "$remaining_chars" '')
+
+    # Combine with colors
+    local bar=""
+    [ -n "$installed_bar" ] && bar="${bar}\\e[42m${installed_bar}\\e[0m"
+    [ -n "$failed_bar" ] && bar="${bar}\\e[41m${failed_bar}\\e[0m"
+    [ -n "$remaining_bar" ] && bar="${bar}\\e[100m${remaining_bar}\\e[0m"
 
     local processed=$((installed + failed))
-    local installed_width=$((installed * width / total))
-    local failed_width=$((failed * width / total))
-    local remaining_width=$((width - installed_width - failed_width))
-
-    # Build the bar with ASCII characters
-    local bar=""
-    # Green for installed
-    if [ $installed_width -gt 0 ]; then
-        bar="$bar\\e[42m$(printf '%*s' $installed_width | tr ' ' '#')\\e[0m"
-    fi
-    # Red for failed
-    if [ $failed_width -gt 0 ]; then
-        bar="$bar\\e[41m$(printf '%*s' $failed_width | tr ' ' '#')\\e[0m"
-    fi
-    # Gray for remaining
-    if [ $remaining_width -gt 0 ]; then
-        bar="$bar\\e[100m$(printf '%*s' $remaining_width | tr ' ' '-')\\e[0m"
-    fi
-
-    # Output with PROGRESS_BAR marker for Python to detect
     printf "PROGRESS_BAR:[%b] %d/%d (\\e[32m%d ok\\e[0m \\e[31m%d fail\\e[0m)\\n" "$bar" "$processed" "$total" "$installed" "$failed"
 }
 
