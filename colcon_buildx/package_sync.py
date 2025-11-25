@@ -196,62 +196,42 @@ def generate_sync_script(
     script = """#!/bin/bash
 set -e
 
-# Progress bar with UTF-8 blocks
+# Simple progress bar: [processed|remaining]
 show_progress_bar() {
     local installed=$1
     local failed=$2
     local total=$3
     local width=40
 
-    # DEBUG
-    echo "PROGRESS_BAR:DEBUG called with installed=$installed failed=$failed total=$total"
-
     # Block characters array: ▏ ▎ ▍ ▌ ▋ ▊ ▉ █
-    # Embed UTF-8 directly for maximum compatibility
     local -a BLOCKS=('▏' '▎' '▍' '▌' '▋' '▊' '▉' '█')
+
+    # Calculate processed (installed + failed)
+    local processed=$((installed + failed))
 
     # Calculate widths in eighths for smooth rendering
     local total_eighths=$((width * 8))
-    local installed_eighths=$((installed * total_eighths / total))
-    local failed_eighths=$((failed * total_eighths / total))
+    local processed_eighths=$((processed * total_eighths / total))
 
-    # Calculate character counts
-    local installed_chars=$((installed_eighths / 8))
-    local installed_partial=$((installed_eighths % 8))
-    [ $installed_partial -gt 0 ] && installed_chars=$((installed_chars + 1))
+    # Build processed bar (full blocks + partial)
+    local processed_full=$((processed_eighths / 8))
+    local processed_partial=$((processed_eighths % 8))
 
-    local failed_chars=$((failed_eighths / 8))
-    local failed_partial=$((failed_eighths % 8))
-    [ $failed_partial -gt 0 ] && failed_chars=$((failed_chars + 1))
-
-    local remaining_chars=$((width - installed_chars - failed_chars))
-
-    # Build installed bar (full blocks + partial)
-    local installed_bar=""
+    local processed_bar=""
     local i
-    for ((i=0; i<$((installed_eighths / 8)); i++)); do
-        installed_bar="${installed_bar}${BLOCKS[7]}"  # Full block █
+    for ((i=0; i<processed_full; i++)); do
+        processed_bar="${processed_bar}${BLOCKS[7]}"
     done
-    [ $installed_partial -gt 0 ] && installed_bar="${installed_bar}${BLOCKS[$((installed_partial-1))]}"
+    [ $processed_partial -gt 0 ] && processed_bar="${processed_bar}${BLOCKS[$((processed_partial-1))]}"
 
-    # Build failed bar (full blocks + partial)
-    local failed_bar=""
-    for ((i=0; i<$((failed_eighths / 8)); i++)); do
-        failed_bar="${failed_bar}${BLOCKS[7]}"  # Full block █
-    done
-    [ $failed_partial -gt 0 ] && failed_bar="${failed_bar}${BLOCKS[$((failed_partial-1))]}"
-
-    # Build remaining bar (spaces)
+    # Calculate remaining
+    local processed_chars=$((processed_full))
+    [ $processed_partial -gt 0 ] && processed_chars=$((processed_chars + 1))
+    local remaining_chars=$((width - processed_chars))
     local remaining_bar=$(printf '%*s' "$remaining_chars" '')
 
-    # Combine with colors
-    local bar=""
-    [ -n "$installed_bar" ] && bar="${bar}\\e[42m${installed_bar}\\e[0m"
-    [ -n "$failed_bar" ] && bar="${bar}\\e[41m${failed_bar}\\e[0m"
-    [ -n "$remaining_bar" ] && bar="${bar}\\e[100m${remaining_bar}\\e[0m"
-
-    local processed=$((installed + failed))
-    printf "PROGRESS_BAR:[%b] %d/%d (\\e[32m%d ok\\e[0m \\e[31m%d fail\\e[0m)\\n" "$bar" "$processed" "$total" "$installed" "$failed"
+    # Simple output - no colors, just the bar
+    printf "PROGRESS_BAR:[%s%s] %d/%d (%d ok %d fail)\\n" "$processed_bar" "$remaining_bar" "$processed" "$total" "$installed" "$failed"
 }
 
 echo "Updating package lists..."
