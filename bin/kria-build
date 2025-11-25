@@ -6,7 +6,7 @@ set -e
 
 # Default configuration
 CONTAINER_NAME=ros2-kria-builder
-IMAGE_NAME="git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base"
+IMAGE_NAME="sapertuz/smrbx-buildx:kv26-jazzy"
 SYNC_TARGET=""
 DRY_RUN=false
 ROS_DISTRO=jazzy  # Auto-detected from image name
@@ -152,7 +152,7 @@ Prerequisites (x86_64 hosts):
      docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
   2. Pull the Docker image:
-     docker pull --platform linux/arm64 git.smarobox.de:5050/.../jazzy-base
+     docker pull --platform linux/arm64 sapertuz/smrbx-buildx:kv26-jazzy
 
 For more information, see:
   https://git.smarobox.de/smarobix/kria-build-tools

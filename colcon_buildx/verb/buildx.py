@@ -71,7 +71,7 @@ class BuildxVerb(VerbExtensionPoint):
         docker_group = parser.add_argument_group('Docker Options (--method docker)')
         docker_group.add_argument(
             '--docker-image',
-            help='Docker image for cross-compilation (e.g., git.smarobox.de:5050/.../jazzy-base)'
+            help='Docker image for cross-compilation (e.g., sapertuz/smrbx-buildx:kv26-jazzy)'
         )
         docker_group.add_argument(
             '--docker-platform',
@@ -104,7 +104,7 @@ class BuildxVerb(VerbExtensionPoint):
         deps_group.add_argument(
             '--install-deps-on-device',
             metavar='SSH_TARGET',
-            help='Install workspace dependencies on target device via SSH (e.g., ubuntu@kria). Recommended before --sync-from-device.'
+            help='Install workspace dependencies on target device via SSH (e.g., ubuntu@10.42.0.3). Recommended before --sync-from-device.'
         )
 
         # Deployment
@@ -116,7 +116,7 @@ class BuildxVerb(VerbExtensionPoint):
         )
         deploy_group.add_argument(
             '--deploy-target',
-            help='Deployment target in format user@host:/path/to/install (e.g., ubuntu@kria-vision-home:~/ros2_ws/install/)'
+            help='Deployment target in format user@host:/path/to/install (e.g., ubuntu@10.42.0.3:~/ros2_ws/install/)'
         )
 
         # Pass-through colcon args
@@ -206,7 +206,7 @@ class BuildxVerb(VerbExtensionPoint):
                 # Docker-based cross-compilation
                 if not args.docker_image:
                     logger.error("❌ --docker-image is required for docker method")
-                    logger.info("💡 Example: --docker-image git.smarobox.de:5050/smarobix/automatica-2025/kria_ros_cross_compile:jazzy-base")
+                    logger.info("💡 Example: --docker-image sapertuz/smrbx-buildx:kv26-jazzy")
                     return 1
 
                 from colcon_buildx.docker import DockerBuilder
@@ -263,7 +263,7 @@ class BuildxVerb(VerbExtensionPoint):
             if args.deploy:
                 if not args.deploy_target:
                     logger.error("❌ --deploy-target is required when --deploy is used")
-                    logger.info("💡 Example: --deploy-target ubuntu@kria-vision-home:~/ros2_ws/install/")
+                    logger.info("💡 Example: --deploy-target ubuntu@10.42.0.3:~/ros2_ws/install/")
                     return 1
 
                 from colcon_buildx.deployment import deploy
