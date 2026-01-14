@@ -37,9 +37,9 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile"
-Repository = "https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile"
-Issues = "https://git.smarobox.de/smarobix/automatica-2025/kria_ros_cross_compile/-/issues"
+Homepage = "https://gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile"
+Repository = "https://gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile"
+Issues = "https://gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile/-/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "colcon_buildx.__version__"}

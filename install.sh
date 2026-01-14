@@ -6,7 +6,7 @@ set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
 SCRIPT_NAME="kria-build"
-REPO_URL="git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git"
+REPO_URL="git@gitlab.com:smarobix/research-and-development/fpga/kria_ros_buildx_compile.git"
 
 echo "🚀 Installing Kria Build Tool..."
 

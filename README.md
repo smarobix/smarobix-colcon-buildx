@@ -21,7 +21,7 @@ Cross-compilation tools for ROS 2 targeting embedded ARM64 boards (Xilinx Kria, 
 
 ```bash
 # Install directly from GitLab
-pip install git+ssh://git@git.smarobox.de/smarobix/automatica-2025/kria_ros_buildx_compile.git
+pip install git+ssh://git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git
 
 # Or install in editable mode for development
 cd kria_ros_cross_compile
@@ -317,7 +317,7 @@ cross_compile:
   services:
     - docker:24-dind
   before_script:
-    - pip install git+ssh://git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git
+    - pip install git+ssh://git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git
   script:
     - colcon buildx --method docker --docker-image $CI_REGISTRY/...
   artifacts:
@@ -459,7 +459,7 @@ The original `kria-build` script is maintained for deployment scripts and CI/CD 
 
 **Installation:**
 ```bash
-curl -fsSL git@git.smarobox.de:smarobix/automatica-2025/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
+curl -fsSL git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
 ```
 
 **Usage:**
