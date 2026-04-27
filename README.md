@@ -1,472 +1,185 @@
-# Kria Build Tools
+# colcon-buildx
 
-Cross-compilation tools for ROS 2 targeting embedded ARM64 boards (Xilinx Kria, Raspberry Pi, NVIDIA Jetson, etc.).
+A colcon extension for cross-compiling ROS 2 workspaces against board-specific Docker images. Targets embedded ARM boards on both `arm64` (aarch64) and `armhf` (ARMv7-A hard-float) architectures, with package version sync from the target device and optional rsync deploy.
 
-## Overview
+## What this does
 
-`colcon-buildx` is a colcon extension that adds cross-compilation support for embedded ARM64 boards. It provides native colcon integration with support for Docker-based and SSHFS-based cross-compilation.
+`colcon buildx` runs your colcon build inside a Docker image that already has ROS 2 installed for the target architecture. The host stays clean (no toolchain on your laptop), the image carries the matching libc, ROS, and DDS, and the build artifacts land in `cross_install/` ready to copy to the board.
 
-**Features:**
-- **Native Colcon Integration** - `colcon buildx` command with full colcon argument support
-- **Two Build Methods** - Docker (containerized) and SSHFS (sysroot mounting - untested)
-- **Package Synchronization** - Sync package versions between Docker image and target device
-- **Automatic Dependency Installation** - rosdep integration for both build methods
-- **Configuration Files** - `.buildx.conf` or `.buildx.yml` for project-specific settings
-- **Automatic Deployment** - Optional rsync deployment to target boards
-- **Generic** - Works with any ARM64 board with a Docker image
+It plugs into colcon as a verb, so anything you would normally pass to `colcon build` (such as `--packages-select`, `--cmake-args`) is forwarded.
+
+## Supported architectures
+
+| Architecture | Tested on | Generally compatible with |
+|---|---|---|
+| `arm64` | Kria K26 (Humble, Jazzy) | NVIDIA Jetson, Raspberry Pi 4 / 5 (64-bit), other Cortex-A53 / A72 / A76 boards |
+| `armhf` | Pynq-Z1, Pynq-Z2 (Humble, Jazzy) | Raspberry Pi 32-bit, other Cortex-A7 / A9 boards running an `arm32v7` user space |
+
+The architecture is selected at build time by `docker_platform` (`linux/arm64` or `linux/arm/v7`) and by which Docker image you point at.
+
+## Backends
+
+There are two backends. Docker is the recommended path and the one used in CI. SSHFS sysroot is currently experimental and untested with the latest changes (the code path still hardcodes `aarch64-linux-gnu` sysroot layout, so it will not work as-is on `armhf`).
+
+| Backend | Status | When to use |
+|---|---|---|
+| `docker` | Recommended, used in CI | You have a Docker image for the target board |
+| `sysroot` | Experimental, untested | You want to build against the live filesystem of a running board over SSHFS |
+
+The rest of this README focuses on the Docker backend.
+
+## Where the Docker images come from
+
+The companion repository [`smarobix/buildx-docker-images`](https://github.com/smarobix/buildx-docker-images) builds and publishes board-specific Docker images that work with `colcon buildx` out of the box (Kria K26 today, Pynq-Z1 / Pynq-Z2 in progress). You can also bring your own. Any image with ROS 2 installed under `/opt/ros/<distro>` and a working colcon will work.
 
 ## Installation
 
-### Colcon Extension (Recommended)
+```bash
+pip install git+ssh://git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git
+```
+
+For local development:
 
 ```bash
-# Install directly from GitLab
-pip install git+ssh://git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git
-
-# Or install in editable mode for development
-cd kria_ros_cross_compile
+git clone git@github.com:smarobix/colcon-buildx.git
+cd colcon-buildx
 pip install -e .
-
-# Verify installation
 colcon buildx --help
 ```
 
-### Prerequisites
+## Prerequisites
 
-**⚠️ IMPORTANT for x86_64 users:**
-
-If you're on an **Intel/AMD processor** (x86_64), you **must** enable ARM64 emulation:
+Docker, `colcon-core`, and a target Docker image. If you are on an `x86_64` host you also need QEMU registered for the target platform so `docker run --platform=linux/arm64` (or `linux/arm/v7`) works.
 
 ```bash
-# Check your architecture
-uname -m
-# If x86_64 or amd64, run:
+# One-shot, register binfmt handlers for ARM emulation
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-# Verify it worked
-docker run --rm --platform linux/arm64 alpine uname -m
-# Should output: aarch64
+# Sanity check
+docker run --rm --platform linux/arm64 alpine uname -m   # → aarch64
+docker run --rm --platform linux/arm/v7 alpine uname -m  # → armv7l
 ```
 
-**Note:** ARM64 machines (Apple Silicon M1/M2/M3, Raspberry Pi, etc.) don't need emulation!
+`arm64` Macs (Apple Silicon) and ARM Linux hosts do not need QEMU.
 
-**Authenticate and pull Docker image:**
+## Quick start
 
-```bash
-# Pull the image (after enabling QEMU if on x86_64)
-docker pull --platform linux/arm64 sapertuz/smrbx-buildx:kv26-jazzy
-```
-
-## Quick Start
-
-### 1. Create Configuration File
-
-In your ROS 2 workspace root, create `.buildx.conf`:
+In your ROS 2 workspace root, drop a `.buildx.conf`:
 
 ```bash
-# Docker method (recommended)
 method = docker
 docker_image = sapertuz/smrbx-buildx:kv26-jazzy
+docker_platform = linux/arm64
 deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
 
-### 2. Build
+Then build:
 
 ```bash
 cd ~/my_ros2_workspace
 colcon buildx
 ```
 
-This will:
-- Use the Docker image
-- Cross-compile for ARM64
-- Output to `cross_build/` and `cross_install/`
+Output goes to `cross_build/` and `cross_install/` (kept separate from native `build/` and `install/` so the two trees do not collide).
 
-### 3. Deploy (Optional)
+For an `armhf` board (Pynq-Z1 example):
 
 ```bash
-colcon buildx --deploy
+method = docker
+docker_image = sapertuz/smrbx-buildx:pynq-z1-jazzy
+docker_platform = linux/arm/v7
+deploy_target = xilinx@192.168.2.99:~/ros2_ws/install/
 ```
 
-## Package Synchronization
+See [`buildx-docker-images`](https://github.com/smarobix/buildx-docker-images) for the full list of available image tags.
 
-The tool provides mechanisms to keep packages synchronized between your Docker image and target device.
+## Configuration
 
-### Recommended Workflow
+Two formats are supported, both with the same keys.
 
-The **device is the source of truth**. This workflow ensures your Docker build environment matches your target device's package versions.
-
-**⚠️ IMPORTANT - Update Device First:**
-
-Before syncing, **always** update your target device to ensure package versions are current:
+`.buildx.conf` (key=value):
 
 ```bash
-# SSH to device and update
-ssh ubuntu@10.42.0.3
-sudo apt-get update && sudo apt-get upgrade -y
-exit
-```
-
-**Then follow this workflow:**
-
-```bash
-# Step 1: Install workspace dependencies on target device
-colcon buildx --install-deps-on-device ubuntu@10.42.0.3
-
-# Step 2: Sync Docker image to match device packages
-colcon buildx --sync-from-device ubuntu@10.42.0.3
-
-# Step 3: Build with synchronized environment
-colcon buildx
-```
-
-**What happens during sync:**
-- Compares package versions between device and Docker image
-- Creates a new Docker image with packages matching your device
-- Generates detailed sync report in `cross_log/sync-packages-*.log`
-- Auto-detects and uses synced images in future builds
-
-## Build Methods
-
-### Docker Method (Recommended)
-
-Uses pre-built Docker containers for cross-compilation.
-
-**Configuration:**
-
-```bash
-# .buildx.conf
 method = docker
 docker_image = sapertuz/smrbx-buildx:kv26-jazzy
 docker_platform = linux/arm64
 build_base = cross_build
 install_base = cross_install
-```
-
-**Usage:**
-
-```bash
-colcon buildx --method docker \
-  --docker-image sapertuz/smrbx-buildx:kv26-jazzy
-```
-
-### SSHFS Sysroot Method
-
-Mounts the target board's filesystem via SSHFS and cross-compiles against it.
-
-**Configuration:**
-
-```bash
-# .buildx.conf
-method = sysroot
-sysroot_host = kria-vision-home
-sysroot_mount = ~/mnt/kria-sysroot
-toolchain = toolchainfile.cmake
-deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
-```
-
-**Usage:**
-
-```bash
-colcon buildx --method sysroot \
-  --sysroot-host kria-vision-home \
-  --toolchain toolchainfile.cmake
-```
-
-## Configuration Files
-
-### Format 1: Simple Key=Value (.buildx.conf)
-
-```bash
-# Cross-compilation method
-method = docker
-
-# Docker settings
-docker_image = sapertuz/smrbx-buildx:kv26-jazzy
-docker_platform = linux/arm64
-
-# Build directories
-build_base = cross_build
-install_base = cross_install
-
-# Deployment
 deploy = false
 deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
 
-### Format 2: YAML (.buildx.yml)
+`.buildx.yml` (YAML):
 
 ```yaml
-# Cross-compilation method
 method: docker
-
-# Docker settings
-docker_image: sapertuz/smrbx-buildx:kv26-jazzy
-docker_platform: linux/arm64
-
-# Build directories
+docker_image: sapertuz/smrbx-buildx:pynq-z1-jazzy
+docker_platform: linux/arm/v7
 build_base: cross_build
 install_base: cross_install
-
-# Deployment
-deploy: false
-deploy_target: ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
 
-### Configuration Priority
+Precedence: command-line flags override the config file, which overrides defaults. The tool walks up from `cwd` looking for `.buildx.conf`, `.buildx.yml`, or `.buildx.yaml` and stops at the workspace root (the directory containing `src/`).
 
-1. Command-line arguments (highest priority)
-2. Configuration file
-3. Default values
+## Package sync from the device
 
-## Usage Examples
+ROS 2 packages installed on a target board can drift away from what is in the Docker image (security updates, manual installs). `colcon buildx --sync-from-device` rebuilds a `*-synced-YYYYMMDD` tag of your image with package versions matching the device, and future builds pick it up automatically.
 
-### Basic Build
+The recommended workflow treats the device as the source of truth:
 
 ```bash
-colcon buildx
-```
+# Update the device first so package versions are current
+ssh ubuntu@10.42.0.3 'sudo apt-get update && sudo apt-get upgrade -y'
 
-### Build Specific Packages
-
-```bash
-colcon buildx --packages-select my_package another_package
-```
-
-### Build with Package Sync (Recommended Workflow)
-
-```bash
-# Step 0: Update device first (IMPORTANT!)
-ssh ubuntu@10.42.0.3
-sudo apt-get update && sudo apt-get upgrade -y
-exit
-
-# Step 1: Install workspace dependencies on target device
+# Install the workspace's apt dependencies on the device
 colcon buildx --install-deps-on-device ubuntu@10.42.0.3
 
-# Step 2: Sync Docker image to match device
+# Sync the Docker image to match the device
 colcon buildx --sync-from-device ubuntu@10.42.0.3
 
-# Step 3: Build (auto-uses synced image)
+# Build (auto-uses the synced image)
 colcon buildx
-
-# Force using original base image if needed
-colcon buildx --use-base-image
 ```
 
-### Build and Deploy
+Pass `--use-base-image` to skip auto-detection and use the original tag.
+
+## Deploy
+
+Optional. If `deploy_target` is set (or passed via `--deploy-target`), `--deploy` rsyncs `cross_install/` to that path on the board after a successful build.
 
 ```bash
 colcon buildx --deploy
+colcon buildx --deploy --deploy-target ubuntu@other-board:~/ros2_ws/install/
 ```
 
-### Build with Custom CMake Args
+## Common arguments
 
 ```bash
+colcon buildx --packages-select my_pkg                                       # pass-through to colcon
+colcon buildx --packages-skip rviz2 --deploy
 colcon buildx --cmake-args -DCMAKE_BUILD_TYPE=Release
-```
-
-### Override Configuration
-
-```bash
-colcon buildx --method docker --docker-image custom:image
-```
-
-### Deploy to Different Target
-
-```bash
-colcon buildx --deploy --deploy-target ubuntu@other-board:~/install/
-```
-
-### Clean Build
-
-```bash
-# Remove build directories first
-rm -rf cross_build cross_install
-colcon buildx
-```
-
-### Selective Builds
-
-```bash
-# Build only one package
-colcon buildx --packages-select my_package
-
-# Skip packages (e.g., skip visualization on headless Kria)
-colcon buildx --packages-skip visualization_pkg --deploy
-```
-
-### SSHFS with Dependencies
-
-```bash
-# Install deps on device, then build with SSHFS
-colcon buildx --method sysroot \
-  --sysroot-host kria-vision-home \
-  --toolchain toolchainfile.cmake \
-  --install-deps
-```
-
-## CI/CD Integration
-
-### GitLab CI Example
-
-```yaml
-cross_compile:
-  stage: build
-  image: docker:24-dind
-  services:
-    - docker:24-dind
-  before_script:
-    - pip install git+ssh://git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git
-  script:
-    - colcon buildx --method docker --docker-image $CI_REGISTRY/...
-  artifacts:
-    paths:
-      - cross_install/
+colcon buildx --method docker --docker-image my-registry/my:tag --docker-platform linux/arm/v7
+colcon buildx --use-base-image                                               # skip synced-image detection
 ```
 
 ## Troubleshooting
 
-### "exec format error"
+`exec format error`: QEMU not registered. Re-run `docker run --rm --privileged multiarch/qemu-user-static --reset -p yes`.
 
-**Cause:** ARM64 emulation not enabled on x86_64.
+`Could not find ROS 2 workspace`: `cwd` has no `src/` and neither does any parent. Run from the workspace root.
 
-**Solution:**
-```bash
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-```
+`Docker image not found`: not authenticated to the registry, or the image is on a private registry. Run `docker login` first.
 
-### "Could not find ROS 2 workspace"
+Synced image not picked up: confirm it exists with `docker images | grep synced`. The auto-detect matches `<base-tag>-synced-<YYYYMMDD>`. If the base tag was renamed, re-run `--sync-from-device`.
 
-**Cause:** Not running from within a ROS 2 workspace.
+`rosdep init` fails inside the container: the Docker image is responsible for `rosdep init` / `rosdep update` at build time. If you are bringing your own image, make sure rosdep is initialised there.
 
-**Solution:** Navigate to a directory containing a `src/` folder or create one.
+Builds are slow: the tool reuses persistent build / install directories for fast incremental builds. Avoid blowing them away unless you need to. Do not pass `--rebuild-container` (or its equivalents) unless you are debugging the image itself.
 
-### "colcon: command not found"
+## Legacy `kria-build` script
 
-**Cause:** ROS environment not activated.
+The repository still ships a 269-line standalone bash script at `bin/kria-build`. It predates the colcon extension, is hardcoded for Kria and `arm64`, and is kept in tree so older deployment scripts keep working. New work should use `colcon buildx`. The standalone script will be removed once nothing depends on it.
 
-**Solution:**
-```bash
-source /opt/ros/humble/setup.bash  # or jazzy
-```
+## License
 
-### "Docker image not found"
-
-**Cause:** Not authenticated to GitLab registry.
-
-**Solution:**
-```bash
-docker login git.smarobox.de:5050
-```
-
-### "No configuration found"
-
-**Cause:** Missing `.buildx.conf` in workspace root.
-
-**Solution:**
-```bash
-cd ~/my_ros2_workspace
-cp kria_ros_cross_compile/.buildx.conf.example .buildx.conf
-# Edit as needed
-```
-
-### Builds are slow
-
-**Cause:** Container is being rebuilt or cache is lost.
-
-**Solution:** Don't use `--rebuild-container` unless necessary. The tool uses persistent Docker volumes for fast incremental builds.
-
-### "Package sync failed" or SSH connection issues
-
-**Cause:** Cannot connect to target device via SSH, or device packages are outdated.
-
-**Solution:**
-```bash
-# Test SSH connection first
-ssh ubuntu@10.42.0.3
-
-# Ensure passwordless SSH is set up
-ssh-copy-id ubuntu@10.42.0.3
-
-# IMPORTANT: Update device packages before syncing
-ssh ubuntu@10.42.0.3
-sudo apt-get update && sudo apt-get upgrade -y
-exit
-
-# Then retry sync
-colcon buildx --sync-from-device ubuntu@10.42.0.3
-
-# Check detailed sync log for package issues
-cat cross_log/sync-packages-*.log
-```
-
-### Synced image not being used
-
-**Cause:** Auto-detection might not find the synced image.
-
-**Solution:**
-```bash
-# List Docker images to verify synced image exists
-docker images | grep synced
-
-# Check sync manifest and logs
-cat .buildx-sync-manifest.json
-ls -lh cross_log/sync-packages-*.log
-
-# Manually specify to use base image if needed
-colcon buildx --use-base-image
-
-# Re-sync if image was accidentally deleted
-colcon buildx --sync-from-device ubuntu@10.42.0.3
-```
-
-### rosdep install fails
-
-**Cause:** rosdep not initialized or package dependencies incorrect.
-
-**Solution:**
-```bash
-# For Docker method: the tool handles rosdep init automatically
-
-# For SSHFS method: initialize rosdep on device
-ssh ubuntu@10.42.0.3
-sudo rosdep init
-rosdep update
-
-# Check package.xml files for correct dependency names
-```
-
-## Advanced Usage
-
-### Container Management
-
-```bash
-# List containers
-docker ps -f name=buildx
-
-# Clean and rebuild
-rm -rf cross_build cross_install
-colcon buildx
-
-# Remove Docker volumes if needed
-docker volume ls | grep buildx
-```
-
-## Legacy Standalone Tool
-
-The original `kria-build` script is maintained for deployment scripts and CI/CD pipelines that don't use colcon directly.
-
-**Installation:**
-```bash
-curl -fsSL git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git/-/raw/main/install.sh | bash
-```
-
-**Usage:**
-```bash
-cd ~/ros2_workspace
-kria-build --dry-run
-kria-build --sync-to kria-board:~/ros2_ws/install/
-```
-
-The standalone tool uses the same configuration files (`.buildx.conf`) and Docker images as the colcon extension.
+License to be finalized before public release.
