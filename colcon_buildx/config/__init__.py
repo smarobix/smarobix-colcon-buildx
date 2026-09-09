@@ -127,3 +127,40 @@ def load_conf_config(config_file):
                 config[key] = value
 
     return config
+
+
+def merge_settings(args, config, defaults, known_keys=None):
+    """
+    Resolve settings with precedence: command line > config file > defaults.
+
+    Every option is declared with ``default=None`` so that "not supplied on the
+    command line" is unambiguous. Anything still ``None`` after parsing falls
+    through to the config file, and then to *defaults*.
+
+    Inferring it instead -- treating any falsy value as "not supplied" -- drops
+    every config key whose flag carries an argparse default, which is what this
+    replaces.
+
+    Args:
+        args: Parsed argparse namespace, mutated in place
+        config: Configuration dictionary (may be None)
+        defaults: Mapping of setting name to fallback value
+        known_keys: Recognised config keys; anything else is reported back
+
+    Returns:
+        list: Config keys that were not recognised, in file order
+    """
+    unknown = []
+
+    for key, value in (config or {}).items():
+        if known_keys is not None and key not in known_keys:
+            unknown.append(key)
+            continue
+        if getattr(args, key, None) is None:
+            setattr(args, key, value)
+
+    for key, value in defaults.items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, value)
+
+    return unknown
