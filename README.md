@@ -35,7 +35,7 @@ The companion repository [`smarobix/buildx-docker-images`](https://github.com/sm
 
 ## Yocto / meta-ros targets
 
-Boards running a Yocto/meta-ros image (rather than Ubuntu) need binaries linked against the **meta-ros sysroot**; binaries from an Ubuntu-based image won't run on them. There are two ways to build for them, and both use the same meta-ros SDK and produce the same result.
+Boards running a Yocto/meta-ros image (rather than Ubuntu) need binaries linked against the **meta-ros sysroot**; binaries from an Ubuntu-based image won't run on them. There are three ways to build for them. The first two cross-compile with the meta-ros SDK; the third compiles natively in a dev container built by bitbake. All three produce binaries that run on the board.
 
 **On a Linux host with the SDK installed** (`--method sdk`):
 
@@ -48,6 +48,12 @@ colcon buildx --method sdk \
 
 ```bash
 colcon buildx --method docker --docker-image k26-oesdk:jazzy
+```
+
+**Natively, in a dev container built by bitbake** from the same configuration as the board image (`buildx-docker-images/yocto`, recipe `ros-dev-container`). It runs *as* the target architecture, so it goes through the normal Docker path with no cross toolchain involved. It also includes the Python message generator, so unlike the SDK routes, interface packages get Python bindings too:
+
+```bash
+colcon buildx --method docker --docker-image ros-dev-container:jazzy --docker-platform linux/arm64
 ```
 
 An SDK image carries a cross toolchain and the target sysroot and runs on the **host** architecture. colcon-buildx recognises it by these image labels, skips `--platform`, and sources the SDK instead of `/opt/ros/<distro>/setup.bash`:
@@ -67,7 +73,7 @@ What the SDK has to contain, and what colcon-buildx takes care of:
 - **A toolchain wrapper.** The SDK's stock toolchain file only lets `find_package()` search the target sysroot, spells that sysroot in a form CMake doesn't match against, and never tells CMake where ROS is. colcon-buildx wraps it (`cross_build/buildx-toolchain.cmake`) so a workspace can find `ament_cmake` and its own packages. `--emit-mixin` writes the same settings as a colcon mixin for use with plain `colcon build`.
 - **Ninja.** Meta-ros SDKs ship `ninja` but not `make`, so colcon-buildx uses Ninja unless you set `CMAKE_GENERATOR` yourself.
 - `--method sdk` needs a **Linux** host, because the SDK is a Linux binary. On macOS, use an SDK image.
-- No Python message bindings: meta-ros SDKs don't ship `rosidl_generator_py`, so interface packages get C/C++ only.
+- No Python message bindings with the SDK routes: meta-ros SDKs don't ship `rosidl_generator_py`, so interface packages get C/C++ only. The dev container does generate them.
 
 **Sourcing the result on the board.** A POSIX shell can't find its own path when sourcing a script, so colcon's scripts fall back to the path used at build time, which is a path on the build host. Point them at the deployed location, and source ROS itself first:
 
