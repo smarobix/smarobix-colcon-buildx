@@ -1,6 +1,7 @@
 """Docker-based cross-compilation builder."""
 
 import json
+import os
 import shlex
 import subprocess
 import re
@@ -25,6 +26,21 @@ KIND_OE_SDK = 'oe-sdk'
 SDK_WORKSPACE = '/workspace'
 SDK_BUILD_DIR = SDK_WORKSPACE + '/cross_build'
 SDK_INSTALL_DIR = SDK_WORKSPACE + '/cross_install'
+
+
+def _user_args():
+    """
+    Run the build as the invoking user rather than as root.
+
+    Containers run as root by default, so everything they write into the
+    bind-mounted build and install directories came out owned by root: on a
+    host without sudo the user could not even delete their own build tree.
+    HOME points somewhere writable because the host user has no home inside
+    the image.
+    """
+    if not hasattr(os, 'getuid') or os.getuid() == 0:
+        return []
+    return ['--user', f'{os.getuid()}:{os.getgid()}', '-e', 'HOME=/tmp']
 
 
 class DockerBuilder:
@@ -309,7 +325,9 @@ class DockerBuilder:
 
         script = (
             f'source /opt/ros/{ros_distro}/setup.bash && '
-            f'colcon build'
+            # Logs go into the mounted build base: under --user the container
+            # cannot write /workspace, and inside it they were lost anyway.
+            f'colcon --log-base {SDK_WORKSPACE}/cross_build/log build'
             f' --build-base {SDK_WORKSPACE}/cross_build'
             f' --install-base {SDK_WORKSPACE}/cross_install'
             f' --merge-install {shlex.join(extra_args)}'
@@ -318,6 +336,7 @@ class DockerBuilder:
         return [
             'docker', 'run',
             '--rm',
+            *_user_args(),
             '--platform', self.platform,
             '-v', f'{self.workspace_root}/src:{SDK_WORKSPACE}/src:ro',  # Read-only source
             '-v', f'{build_dir}:{SDK_WORKSPACE}/cross_build',
@@ -355,7 +374,12 @@ class DockerBuilder:
             '  exit 1; '
             'fi && '
             f'export CMAKE_TOOLCHAIN_FILE={wrapper} && '
-            f'colcon build'
+            # Meta-ros SDKs ship ninja but not make. Use Ninja when the sourced
+            # environment has it and the user has not chosen a generator; an SDK
+            # without ninja keeps CMake's default.
+            'if [ -z "${CMAKE_GENERATOR:-}" ] && command -v ninja >/dev/null; then '
+            'export CMAKE_GENERATOR=Ninja; fi && '
+            f'colcon --log-base {SDK_BUILD_DIR}/log build'
             f' --build-base {SDK_BUILD_DIR}'
             f' --install-base {SDK_INSTALL_DIR}'
             f' --merge-install {shlex.join(extra_args)}'
@@ -366,6 +390,7 @@ class DockerBuilder:
         return [
             'docker', 'run',
             '--rm',
+            *_user_args(),
             '-v', f'{self.workspace_root}/src:{SDK_WORKSPACE}/src:ro',  # Read-only source
             '-v', f'{build_dir}:{SDK_BUILD_DIR}',
             '-v', f'{install_dir}:{SDK_INSTALL_DIR}',

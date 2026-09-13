@@ -185,3 +185,40 @@ def test_sdk_mixin_points_at_the_wrapper(workspace):
 @pytest.mark.skipif(sys.platform.startswith('linux'), reason='the guard only fires off Linux')
 def test_sdk_method_refuses_non_linux_hosts(workspace):
     assert SdkBuilder('/sdk/env', 'b', 'i').check_host() is False
+
+
+# --- running as the invoking user ---------------------------------------------
+
+@pytest.mark.skipif(not hasattr(os, 'getuid') or os.getuid() == 0,
+                    reason='only a non-root caller is remapped')
+@pytest.mark.parametrize('sdk_image', [False, True])
+def test_containers_run_as_the_invoking_user(workspace, sdk_image):
+    builder = _builder()
+    if sdk_image:
+        builder._apply_labels(OE_SDK_IMAGE)
+    (workspace / 'cross_build').mkdir()
+    command = builder._oe_sdk_command if sdk_image else builder._native_command
+    cmd = command(workspace / 'cross_build', workspace / 'cross_install', [])
+    assert cmd[cmd.index('--user') + 1] == f'{os.getuid()}:{os.getgid()}'
+    assert 'HOME=/tmp' in cmd
+
+
+@pytest.mark.parametrize('sdk_image', [False, True])
+def test_colcon_logs_land_in_the_mounted_build_base(workspace, sdk_image):
+    builder = _builder()
+    if sdk_image:
+        builder._apply_labels(OE_SDK_IMAGE)
+    (workspace / 'cross_build').mkdir()
+    command = builder._oe_sdk_command if sdk_image else builder._native_command
+    script = command(workspace / 'cross_build', workspace / 'cross_install', [])[-1]
+    assert 'colcon --log-base /workspace/cross_build/log build' in script
+
+
+def test_sdk_builds_use_ninja_only_when_available_and_unchosen(workspace):
+    builder = _builder()
+    builder._apply_labels(OE_SDK_IMAGE)
+    (workspace / 'cross_build').mkdir()
+    script = builder._oe_sdk_command(
+        workspace / 'cross_build', workspace / 'cross_install', [])[-1]
+    assert ('if [ -z "${CMAKE_GENERATOR:-}" ] && command -v ninja >/dev/null; then '
+            'export CMAKE_GENERATOR=Ninja; fi') in script

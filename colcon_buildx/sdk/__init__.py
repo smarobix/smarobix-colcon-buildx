@@ -198,6 +198,11 @@ class SdkBuilder:
             f'{self._source_prefix()} && '
             f'export ROS_WORKSPACE={shlex.quote(str(self.workspace_root))} && '
             f'export CMAKE_TOOLCHAIN_FILE={shlex.quote(str(wrapper))} && '
+            # Meta-ros SDKs ship ninja but not make. Use Ninja when the sourced
+            # environment has it and the user has not chosen a generator, so a
+            # host without make can build; otherwise keep CMake's default.
+            'if [ -z "${CMAKE_GENERATOR:-}" ] && command -v ninja >/dev/null; then '
+            'export CMAKE_GENERATOR=Ninja; fi && '
             'colcon build'
             f' --build-base {shlex.quote(str(build_dir))}'
             f' --install-base {shlex.quote(str(self.workspace_root / self.install_base))}'
