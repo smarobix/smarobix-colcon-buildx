@@ -26,15 +26,6 @@ SDK_WORKSPACE = '/workspace'
 SDK_BUILD_DIR = SDK_WORKSPACE + '/cross_build'
 SDK_INSTALL_DIR = SDK_WORKSPACE + '/cross_install'
 
-# The SDK's toolchain file sets
-#     CMAKE_FIND_ROOT_PATH       <target sysroot>
-#     CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY
-# so find_package() searches the sysroot and nothing else -- a workspace cannot
-# find the packages it just built itself, and any package with an intra-workspace
-# dependency fails to configure. Wrap the SDK's toolchain in one that appends the
-# colcon install prefix to the find roots, and point CMake at the wrapper.
-TOOLCHAIN_WRAPPER = 'include("{sdk_toolchain}")\nlist(APPEND CMAKE_FIND_ROOT_PATH "{install_dir}")\n'
-
 
 class DockerBuilder:
     """Handles cross-compilation using Docker containers."""
@@ -338,27 +329,31 @@ class DockerBuilder:
 
     def _oe_sdk_command(self, build_dir, install_dir, extra_args):
         """docker run for a cross SDK image, which runs on the host architecture."""
+        from colcon_buildx.toolchain import WRAPPER_NAME, wrapper_text
+
         sources = ' && '.join(f'. {shlex.quote(p)}' for p in self.env_setup)
+
+        # The wrapper refers to $ENV{OE_CMAKE_TOOLCHAIN_FILE} rather than a path,
+        # so it can be written here on the host into the bind-mounted build base
+        # even though that variable only exists once the SDK is sourced in the
+        # container.
+        (build_dir / WRAPPER_NAME).write_text(wrapper_text(SDK_INSTALL_DIR))
+        wrapper = f'{SDK_BUILD_DIR}/{WRAPPER_NAME}'
 
         # CMAKE_TOOLCHAIN_FILE is passed through the environment rather than as
         # --cmake-args: colcon's --cmake-args would collide with a user-supplied
         # one, and CMake has honoured the environment variable since 3.21.
-        # The wrapper is written inside the container: the SDK toolchain path is
-        # only known after its environment scripts have been sourced.
-        wrapper = SDK_BUILD_DIR + '/buildx-toolchain.cmake'
         script = (
             'set -e && '
             f'{sources} && '
             f'export ROS_WORKSPACE={SDK_WORKSPACE} && '
             'if [ -z "$OE_CMAKE_TOOLCHAIN_FILE" ]; then '
-            '  echo "OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment;'
-            ' the SDK is missing ros-sdk-env (ros/meta-ros@1be4737), or was built from'
-            ' a target that does not pull it in -- use ros2-image-sdktest, not'
-            ' ros-image-core" >&2; '
+            '  echo "OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment:'
+            ' the SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in'
+            ' meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK'
+            ' when building the SDK" >&2; '
             '  exit 1; '
             'fi && '
-            f'printf \'include("%s")\\nlist(APPEND CMAKE_FIND_ROOT_PATH "%s")\\n\''
-            f' "$OE_CMAKE_TOOLCHAIN_FILE" {SDK_INSTALL_DIR} > {wrapper} && '
             f'export CMAKE_TOOLCHAIN_FILE={wrapper} && '
             f'colcon build'
             f' --build-base {SDK_BUILD_DIR}'

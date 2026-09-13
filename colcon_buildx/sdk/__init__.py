@@ -89,27 +89,15 @@ class SdkBuilder:
         return ' && '.join(f'. {shlex.quote(p)}' for p in self.env_setup)
 
     def write_toolchain_wrapper(self, toolchain):
-        """
-        Wrap the SDK toolchain so the workspace can find its own packages.
+        """Write the toolchain wrapper around *toolchain* into the build base."""
+        from colcon_buildx.toolchain import WRAPPER_NAME, wrapper_text
 
-        The SDK ships the stock OE toolchain file, which sets
-
-            CMAKE_FIND_ROOT_PATH               <target sysroot>
-            CMAKE_FIND_ROOT_PATH_MODE_PACKAGE  ONLY
-
-        so find_package() searches the sysroot and nothing else. Any package
-        that depends on another package in the same workspace then fails to
-        configure. Appending the colcon install prefix to the find roots is the
-        smallest fix that keeps the SDK's own settings intact.
-        """
         build_dir = self.workspace_root / self.build_base
         build_dir.mkdir(parents=True, exist_ok=True)
         install_dir = self.workspace_root / self.install_base
 
-        wrapper = build_dir / 'buildx-toolchain.cmake'
-        wrapper.write_text(
-            'include("%s")\n'
-            'list(APPEND CMAKE_FIND_ROOT_PATH "%s")\n' % (toolchain, install_dir))
+        wrapper = build_dir / WRAPPER_NAME
+        wrapper.write_text(wrapper_text(install_dir, toolchain))
         return wrapper
 
     def probe_env(self):
@@ -183,7 +171,9 @@ class SdkBuilder:
             logger.error(
                 "❌ OE_CMAKE_TOOLCHAIN_FILE is unset after sourcing the SDK environment")
             logger.error(
-                "💡 The SDK predates ros-sdk-env (ros/meta-ros@1be4737), or is missing it.")
+                "💡 The SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in "
+                "meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK "
+                "when building the SDK.")
             logger.info("ℹ Pass --toolchain to point at the toolchain file directly.")
             return 1
 
