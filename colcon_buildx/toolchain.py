@@ -45,7 +45,10 @@ endif()
 '''
 
 
-def wrapper_text(install_dir, toolchain='$ENV{OE_CMAKE_TOOLCHAIN_FILE}'):
+ENV_TOOLCHAIN = '$ENV{OE_CMAKE_TOOLCHAIN_FILE}'
+
+
+def wrapper_text(install_dir, toolchain=ENV_TOOLCHAIN):
     """
     Return the wrapper toolchain file contents.
 
@@ -58,3 +61,25 @@ def wrapper_text(install_dir, toolchain='$ENV{OE_CMAKE_TOOLCHAIN_FILE}'):
         str: CMake toolchain file contents
     """
     return _TEMPLATE % {'toolchain': toolchain, 'install_dir': install_dir}
+
+
+def write_wrapper(path, install_dir, toolchain=ENV_TOOLCHAIN):
+    """
+    Write the wrapper to *path*, leaving an identical file untouched.
+
+    CMake records an included toolchain file as a configure dependency, so a
+    fresh mtime re-configures every package in the workspace -- rerunning the
+    rosidl generators in interface packages -- even when nothing changed.
+    Rewriting it unconditionally made every incremental build a full
+    re-configure.
+
+    Returns:
+        Path: *path*
+    """
+    from pathlib import Path
+
+    path = Path(path)
+    text = wrapper_text(install_dir, toolchain)
+    if not path.is_file() or path.read_text() != text:
+        path.write_text(text)
+    return path

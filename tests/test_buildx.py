@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 import pytest
@@ -6,7 +7,7 @@ import pytest
 from colcon_buildx import docker
 from colcon_buildx.config import merge_settings
 from colcon_buildx.sdk import SdkBuilder
-from colcon_buildx.toolchain import WRAPPER_NAME, wrapper_text
+from colcon_buildx.toolchain import WRAPPER_NAME, wrapper_text, write_wrapper
 from colcon_buildx.verb.buildx import BuildxVerb, CONFIG_KEYS, DEFAULTS
 
 
@@ -76,6 +77,21 @@ def test_wrapper_adds_install_prefix_to_normalized_find_roots():
 def test_wrapper_hands_ament_prefixes_to_cmake():
     assert 'string(REPLACE ":" ";" _buildx_ament "$ENV{AMENT_PREFIX_PATH}")' \
         in wrapper_text('/i')
+
+
+def test_identical_wrapper_is_not_rewritten(tmp_path):
+    # CMake re-configures every package when an included toolchain file's mtime
+    # changes, so rewriting an unchanged wrapper turns each incremental build
+    # into a full re-configure.
+    path = write_wrapper(tmp_path / WRAPPER_NAME, '/i')
+    os.utime(path, (0, 0))
+
+    write_wrapper(path, '/i')
+    assert path.stat().st_mtime == 0
+
+    write_wrapper(path, '/other')
+    assert path.stat().st_mtime != 0
+    assert path.read_text() == wrapper_text('/other')
 
 
 # --- docker backend -----------------------------------------------------------

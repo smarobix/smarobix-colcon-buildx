@@ -329,7 +329,7 @@ class DockerBuilder:
 
     def _oe_sdk_command(self, build_dir, install_dir, extra_args):
         """docker run for a cross SDK image, which runs on the host architecture."""
-        from colcon_buildx.toolchain import WRAPPER_NAME, wrapper_text
+        from colcon_buildx.toolchain import WRAPPER_NAME, write_wrapper
 
         sources = ' && '.join(f'. {shlex.quote(p)}' for p in self.env_setup)
 
@@ -337,7 +337,7 @@ class DockerBuilder:
         # so it can be written here on the host into the bind-mounted build base
         # even though that variable only exists once the SDK is sourced in the
         # container.
-        (build_dir / WRAPPER_NAME).write_text(wrapper_text(SDK_INSTALL_DIR))
+        write_wrapper(build_dir / WRAPPER_NAME, SDK_INSTALL_DIR)
         wrapper = f'{SDK_BUILD_DIR}/{WRAPPER_NAME}'
 
         # CMAKE_TOOLCHAIN_FILE is passed through the environment rather than as

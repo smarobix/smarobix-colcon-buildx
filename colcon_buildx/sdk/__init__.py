@@ -90,15 +90,13 @@ class SdkBuilder:
 
     def write_toolchain_wrapper(self, toolchain):
         """Write the toolchain wrapper around *toolchain* into the build base."""
-        from colcon_buildx.toolchain import WRAPPER_NAME, wrapper_text
+        from colcon_buildx.toolchain import WRAPPER_NAME, write_wrapper
 
         build_dir = self.workspace_root / self.build_base
         build_dir.mkdir(parents=True, exist_ok=True)
         install_dir = self.workspace_root / self.install_base
 
-        wrapper = build_dir / WRAPPER_NAME
-        wrapper.write_text(wrapper_text(install_dir, toolchain))
-        return wrapper
+        return write_wrapper(build_dir / WRAPPER_NAME, install_dir, toolchain)
 
     def probe_env(self):
         """Source the SDK scripts and read back the variables we care about."""
