@@ -9,9 +9,53 @@ from colcon_core.logging import colcon_logger
 
 logger = colcon_logger.getChild(__name__)
 
+METHODS = ('docker', 'sysroot')
+
+# Fallback values, applied only after the command line and the config file have
+# had their say. Every argument below is declared with ``default=None`` so that
+# "not supplied on the command line" stays distinguishable from "supplied with
+# a value that happens to equal the default"; argparse defaults would make the
+# config file unreachable for these keys.
+DEFAULTS = {
+    'method': 'docker',
+    'build_base': 'cross_build',
+    'install_base': 'cross_install',
+    'docker_platform': 'linux/arm64',
+    'sysroot_mount': os.path.expanduser('~/mnt/board-sysroot'),
+    'rosdep_args': '--ignore-src -y',
+    'deploy': False,
+    'install_deps': False,
+    'use_base_image': False,
+    'no_mount': False,
+}
+
+# Keys accepted in .buildx.conf / .buildx.yml. Anything else is a typo, and
+# silently ignoring it is how the wrong architecture reaches a board.
+CONFIG_KEYS = frozenset(DEFAULTS) | {
+    'docker_image',
+    'sysroot_host',
+    'toolchain',
+    'deploy_target',
+    'sync_from_device',
+    'install_deps_on_device',
+}
+
+
+def _find_workspace_root(start=None):
+    """Walk up from *start* to the directory containing src/."""
+    current = Path(start or Path.cwd())
+    for _ in range(5):
+        if (current / 'src').is_dir():
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return Path(start or Path.cwd())
+
 
 class BuildxVerb(VerbExtensionPoint):
-    """Cross-compile ROS 2 workspace for embedded ARM64 boards."""
+    """Cross-compile ROS 2 workspace for embedded ARM boards."""
 
     def __init__(self):
         super().__init__()
@@ -22,9 +66,10 @@ class BuildxVerb(VerbExtensionPoint):
         # Build method
         parser.add_argument(
             '--method',
-            choices=['sysroot', 'docker'],
-            default='docker',
-            help='Build method: sysroot (SSHFS mount) or docker (container-based). Default: docker'
+            choices=list(METHODS),
+            default=None,
+            help='Build method: docker (container-based) or sysroot (SSHFS mount). '
+                 'Default: docker'
         )
 
         # Common arguments
@@ -35,12 +80,12 @@ class BuildxVerb(VerbExtensionPoint):
         )
         parser.add_argument(
             '--build-base',
-            default='cross_build',
+            default=None,
             help='Build directory for cross-compiled artifacts (default: cross_build)'
         )
         parser.add_argument(
             '--install-base',
-            default='cross_install',
+            default=None,
             help='Install directory for cross-compiled artifacts (default: cross_install)'
         )
 
@@ -52,7 +97,7 @@ class BuildxVerb(VerbExtensionPoint):
         )
         sysroot_group.add_argument(
             '--sysroot-mount',
-            default=os.path.expanduser('~/mnt/board-sysroot'),
+            default=None,
             help='Local mount point for board sysroot (default: ~/mnt/board-sysroot)'
         )
         sysroot_group.add_argument(
@@ -62,6 +107,7 @@ class BuildxVerb(VerbExtensionPoint):
         sysroot_group.add_argument(
             '--no-mount',
             action='store_true',
+            default=None,
             help='Skip SSHFS mounting (assume sysroot already mounted)'
         )
 
@@ -75,7 +121,7 @@ class BuildxVerb(VerbExtensionPoint):
         )
         docker_group.add_argument(
             '--docker-platform',
-            default='linux/arm64',
+            default=None,
             help='Target platform for Docker (default: linux/arm64)'
         )
         docker_group.add_argument(
@@ -86,16 +132,18 @@ class BuildxVerb(VerbExtensionPoint):
         docker_group.add_argument(
             '--use-base-image',
             action='store_true',
+            default=None,
             help='Force use of base image, skip auto-detection of synced images'
         )
         docker_group.add_argument(
             '--install-deps',
             action='store_true',
+            default=None,
             help='Install workspace dependencies using rosdep in Docker image (for dev only, see --install-deps-on-device)'
         )
         docker_group.add_argument(
             '--rosdep-args',
-            default='--ignore-src -y',
+            default=None,
             help='Additional arguments to pass to rosdep install (default: --ignore-src -y)'
         )
 
@@ -112,6 +160,7 @@ class BuildxVerb(VerbExtensionPoint):
         deploy_group.add_argument(
             '--deploy',
             action='store_true',
+            default=None,
             help='Deploy build results to target board after successful build'
         )
         deploy_group.add_argument(
@@ -128,42 +177,37 @@ class BuildxVerb(VerbExtensionPoint):
 
     def main(self, *, context):
         """Execute the cross-compilation build."""
-        from colcon_buildx.config import load_config
+        from colcon_buildx.config import load_config, merge_settings
 
         args = context.args
 
-        # Load configuration file if exists
+        # Precedence: command line > config file > DEFAULTS.
         config = load_config(args.config)
-
-        # Merge config with CLI args (CLI takes precedence)
         if config:
-            logger.info(f"📝 Loaded configuration from file")
-            for key, value in config.items():
-                if not hasattr(args, key) or getattr(args, key) is None:
-                    setattr(args, key, value)
+            logger.info("📝 Loaded configuration from file")
+        unknown = merge_settings(args, config, DEFAULTS, CONFIG_KEYS)
+        for key in unknown:
+            logger.warning(f"⚠ Ignoring unrecognised config key: {key}")
+
+        # choices= no longer covers a value arriving from the config file.
+        if args.method not in METHODS:
+            logger.error(f"❌ Unknown method: {args.method}")
+            logger.info(f"💡 Valid methods: {', '.join(METHODS)}")
+            return 1
 
         logger.info(f"🔧 Cross-compilation method: {args.method}")
 
         try:
             # Handle --install-deps-on-device (standalone operation, works with any method)
-            if hasattr(args, 'install_deps_on_device') and args.install_deps_on_device:
+            if args.install_deps_on_device:
                 from colcon_buildx.rosdep_manager import install_deps_sshfs
-                from pathlib import Path
 
                 logger.info(f"📦 Installing workspace dependencies on device: {args.install_deps_on_device}")
-                rosdep_args = getattr(args, 'rosdep_args', '--ignore-src -y')
-
-                # Find workspace root
-                workspace_root = Path.cwd()
-                for _ in range(5):
-                    if (workspace_root / 'src').is_dir():
-                        break
-                    workspace_root = workspace_root.parent
 
                 success = install_deps_sshfs(
                     args.install_deps_on_device,
-                    workspace_root,
-                    rosdep_args
+                    _find_workspace_root(),
+                    args.rosdep_args
                 )
                 if not success:
                     logger.error("❌ Failed to install dependencies on device")
@@ -195,10 +239,9 @@ class BuildxVerb(VerbExtensionPoint):
                 )
 
                 # Install dependencies if requested
-                if hasattr(args, 'install_deps') and args.install_deps:
-                    logger.info(f"📦 Installing workspace dependencies on device...")
-                    rosdep_args = getattr(args, 'rosdep_args', '--ignore-src -y')
-                    if not builder.install_dependencies(rosdep_args):
+                if args.install_deps:
+                    logger.info("📦 Installing workspace dependencies on device...")
+                    if not builder.install_dependencies(args.rosdep_args):
                         logger.error("❌ Failed to install dependencies")
                         return 1
 
@@ -211,18 +254,16 @@ class BuildxVerb(VerbExtensionPoint):
 
                 from colcon_buildx.docker import DockerBuilder
 
-                # Handle package sync if requested
-                use_base_image = getattr(args, 'use_base_image', False)
                 builder = DockerBuilder(
                     image=args.docker_image,
                     platform=args.docker_platform,
                     build_base=args.build_base,
                     install_base=args.install_base,
-                    use_base_image=use_base_image
+                    use_base_image=args.use_base_image
                 )
 
                 # Sync from device if requested (standalone operation)
-                if hasattr(args, 'sync_from_device') and args.sync_from_device:
+                if args.sync_from_device:
                     logger.info(f"📦 Syncing packages from device: {args.sync_from_device}")
                     synced_image = builder.create_synced_image(args.sync_from_device)
                     if not synced_image:
@@ -234,16 +275,15 @@ class BuildxVerb(VerbExtensionPoint):
                     return 0
 
                 # Install dependencies if requested (with warning for Docker method)
-                if hasattr(args, 'install_deps') and args.install_deps:
+                if args.install_deps:
                     logger.warning("⚠ Warning: --install-deps only installs dependencies in the Docker image.")
                     logger.warning("  The target device will NOT have these dependencies installed.")
                     logger.info("ℹ Recommended workflow:")
                     logger.info("  1. colcon buildx --install-deps-on-device <device>")
                     logger.info("  2. colcon buildx --sync-from-device <device>")
                     logger.info("  3. colcon buildx")
-                    logger.info(f"📦 Installing workspace dependencies in Docker image...")
-                    rosdep_args = getattr(args, 'rosdep_args', '--ignore-src -y')
-                    updated_image = builder.install_dependencies(rosdep_args)
+                    logger.info("📦 Installing workspace dependencies in Docker image...")
+                    updated_image = builder.install_dependencies(args.rosdep_args)
                     if not updated_image:
                         logger.error("❌ Failed to install dependencies")
                         return 1
