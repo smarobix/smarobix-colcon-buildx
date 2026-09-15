@@ -9,7 +9,7 @@ from colcon_core.logging import colcon_logger
 
 logger = colcon_logger.getChild(__name__)
 
-METHODS = ('docker', 'sysroot')
+METHODS = ('docker', 'sysroot', 'sdk')
 
 # Fallback values, applied only after the command line and the config file have
 # had their say. Every argument below is declared with ``default=None`` so that
@@ -27,6 +27,7 @@ DEFAULTS = {
     'install_deps': False,
     'use_base_image': False,
     'no_mount': False,
+    'emit_mixin': False,
 }
 
 # Keys accepted in .buildx.conf / .buildx.yml. Anything else is a typo, and
@@ -35,6 +36,7 @@ CONFIG_KEYS = frozenset(DEFAULTS) | {
     'docker_image',
     'sysroot_host',
     'toolchain',
+    'sdk_env',
     'deploy_target',
     'sync_from_device',
     'install_deps_on_device',
@@ -68,8 +70,8 @@ class BuildxVerb(VerbExtensionPoint):
             '--method',
             choices=list(METHODS),
             default=None,
-            help='Build method: docker (container-based) or sysroot (SSHFS mount). '
-                 'Default: docker'
+            help='Build method: docker (container-based), sysroot (SSHFS mount), '
+                 'or sdk (Yocto/OpenEmbedded SDK on this host). Default: docker'
         )
 
         # Common arguments
@@ -122,7 +124,8 @@ class BuildxVerb(VerbExtensionPoint):
         docker_group.add_argument(
             '--docker-platform',
             default=None,
-            help='Target platform for Docker (default: linux/arm64)'
+            help='Target platform for Docker (default: linux/arm64). Ignored for '
+                 'cross SDK images, which run on the host architecture.'
         )
         docker_group.add_argument(
             '--sync-from-device',
@@ -145,6 +148,21 @@ class BuildxVerb(VerbExtensionPoint):
             '--rosdep-args',
             default=None,
             help='Additional arguments to pass to rosdep install (default: --ignore-src -y)'
+        )
+
+        # SDK-specific arguments
+        sdk_group = parser.add_argument_group('OE/Yocto SDK Options (--method sdk)')
+        sdk_group.add_argument(
+            '--sdk-env',
+            help='Colon-separated list of SDK scripts to source, in order '
+                 '(e.g. /opt/ros-sdk/environment-setup-cortexa72-cortexa53-poky-linux)'
+        )
+        sdk_group.add_argument(
+            '--emit-mixin',
+            action='store_true',
+            default=None,
+            help='Write a colcon mixin describing the SDK cross-build settings, for '
+                 'use with plain `colcon build --mixin` outside this extension'
         )
 
         # Device dependency installation
@@ -244,6 +262,22 @@ class BuildxVerb(VerbExtensionPoint):
                     if not builder.install_dependencies(args.rosdep_args):
                         logger.error("❌ Failed to install dependencies")
                         return 1
+
+            elif args.method == 'sdk':
+                # Yocto / OpenEmbedded SDK installed on this host
+                if not args.sdk_env:
+                    logger.error("❌ --sdk-env is required for sdk method")
+                    logger.info("💡 Example: --sdk-env /opt/ros-sdk/environment-setup-cortexa72-cortexa53-poky-linux")
+                    return 1
+
+                from colcon_buildx.sdk import SdkBuilder
+                builder = SdkBuilder(
+                    env_setup=args.sdk_env,
+                    build_base=args.build_base,
+                    install_base=args.install_base,
+                    toolchain_file=args.toolchain,
+                    emit_mixin=args.emit_mixin
+                )
 
             elif args.method == 'docker':
                 # Docker-based cross-compilation

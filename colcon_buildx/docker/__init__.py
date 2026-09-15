@@ -1,6 +1,8 @@
 """Docker-based cross-compilation builder."""
 
+import json
 import os
+import shlex
 import subprocess
 import re
 from pathlib import Path
@@ -9,6 +11,36 @@ from datetime import datetime
 from colcon_core.logging import colcon_logger
 
 logger = colcon_logger.getChild(__name__)
+
+# Image labels. An image that declares kind=oe-sdk holds a cross toolchain and
+# runs on the *host* architecture, unlike the apt/source images here, which run
+# as the target architecture under emulation and build natively inside it.
+LABEL_KIND = 'org.smarobix.buildx.kind'
+LABEL_ENV_SETUP = 'org.smarobix.buildx.env-setup'
+LABEL_TARGET_PLATFORM = 'org.smarobix.buildx.target-platform'
+LABEL_ROS_DISTRO = 'org.smarobix.buildx.ros-distro'
+
+KIND_ROS_APT = 'ros-apt'
+KIND_OE_SDK = 'oe-sdk'
+
+SDK_WORKSPACE = '/workspace'
+SDK_BUILD_DIR = SDK_WORKSPACE + '/cross_build'
+SDK_INSTALL_DIR = SDK_WORKSPACE + '/cross_install'
+
+
+def _user_args():
+    """
+    Run the build as the invoking user rather than as root.
+
+    Containers run as root by default, so everything they write into the
+    bind-mounted build and install directories came out owned by root: on a
+    host without sudo the user could not even delete their own build tree.
+    HOME points somewhere writable because the host user has no home inside
+    the image.
+    """
+    if not hasattr(os, 'getuid') or os.getuid() == 0:
+        return []
+    return ['--user', f'{os.getuid()}:{os.getgid()}', '-e', 'HOME=/tmp']
 
 
 class DockerBuilder:
@@ -32,6 +64,11 @@ class DockerBuilder:
         self.workspace_root = self._find_workspace_root()
         self.container_name = 'colcon-buildx-builder'
         self.use_base_image = use_base_image
+
+        # Populated from image labels once the image is available locally.
+        self.labels = {}
+        self.kind = KIND_ROS_APT
+        self.env_setup = []
 
         # Detect synced image if not forcing base
         if not use_base_image:
@@ -71,7 +108,7 @@ class DockerBuilder:
         # Search for synced images matching pattern
         pattern = f"{base_tag_clean}-synced-*"
 
-        logger.debug(f"🔍 Searching for synced images...")
+        logger.debug("🔍 Searching for synced images...")
         logger.debug(f"   Base image: {self.base_image}")
         logger.debug(f"   Registry/repo: {registry_and_repo}")
         logger.debug(f"   Base tag: {base_tag}")
@@ -116,22 +153,21 @@ class DockerBuilder:
                 try:
                     date_obj = datetime.strptime(date_str, '%Y%m%d')
                     formatted_date = date_obj.strftime('%Y-%m-%d')
-                except:
+                except ValueError:
                     formatted_date = date_str
 
                 print(f"ℹ️  Using synced image: {newest_image}")
                 print(f"   Synced on: {formatted_date}")
-                logger.info(f"ℹ️  Run with --use-base-image to use original base image instead")
+                logger.info("ℹ️  Run with --use-base-image to use original base image instead")
 
                 return newest_image
 
         except subprocess.CalledProcessError as e:
             logger.debug(f"Failed to list docker images: {e}")
-            pass
 
         # No synced image found
         print(f"ℹ️  Using base image: {self.base_image}")
-        logger.info(f"ℹ️  Run --sync-from-device <target> to create synced version")
+        logger.info("ℹ️  Run --sync-from-device <target> to create synced version")
         return self.base_image
 
     def create_synced_image(self, ssh_target):
@@ -187,7 +223,7 @@ class DockerBuilder:
     def check_docker(self):
         """Check if Docker is available and running."""
         try:
-            result = subprocess.run(['docker', 'info'], capture_output=True, check=True)
+            subprocess.run(['docker', 'info'], capture_output=True, check=True)
             return True
         except subprocess.CalledProcessError:
             logger.error("❌ Docker daemon is not running")
@@ -198,54 +234,170 @@ class DockerBuilder:
             logger.error("💡 Install Docker: https://docs.docker.com/get-docker/")
             return False
 
-    def check_image_exists(self):
-        """Check if the Docker image exists locally or can be pulled."""
-        logger.info(f"🔍 Checking for Docker image: {self.image}")
-
-        # Try to inspect the image
+    def _inspect(self):
+        """Return the `docker image inspect` object for the image, or None."""
         result = subprocess.run(
             ['docker', 'image', 'inspect', self.image],
             capture_output=True,
             text=True
         )
-
-        logger.debug(f"   docker inspect return code: {result.returncode}")
         if result.returncode != 0:
+            logger.debug(f"   docker inspect return code: {result.returncode}")
             logger.debug(f"   stderr: {result.stderr}")
-            logger.debug(f"   stdout: {result.stdout}")
-
-        if result.returncode == 0:
-            print(f"✓ Image found locally")
-            return True
-
-        # Image not found locally, try to pull
-        logger.warning(f"⚠️  Image not found locally, attempting to pull...")
-        logger.info(f"📥 Pulling image: {self.image}")
-        logger.info(f"   Platform: {self.platform}")
-
+            return None
         try:
-            result = subprocess.run(
-                ['docker', 'pull', '--platform', self.platform, self.image],
-                check=True
-            )
-            logger.info(f"✓ Successfully pulled image")
+            parsed = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            logger.debug(f"   could not parse inspect output: {e}")
+            return None
+        return parsed[0] if parsed else None
+
+    def _apply_labels(self, inspected):
+        """Read buildx labels off an inspected image and configure from them."""
+        self.labels = (inspected or {}).get('Config', {}).get('Labels') or {}
+
+        self.kind = self.labels.get(LABEL_KIND, KIND_ROS_APT)
+        env_setup = self.labels.get(LABEL_ENV_SETUP, '')
+        self.env_setup = [p for p in env_setup.split(':') if p]
+
+        if self.kind == KIND_OE_SDK:
+            if not self.env_setup:
+                logger.warning(
+                    f"⚠️  Image declares {LABEL_KIND}={KIND_OE_SDK} but no "
+                    f"{LABEL_ENV_SETUP}; cannot set up the SDK environment")
+            target = self.labels.get(LABEL_TARGET_PLATFORM)
+            print("ℹ️  Cross SDK image — running on the host architecture, not under emulation")
+            if target:
+                print(f"   Target platform: {target}")
+
+    def check_image_exists(self):
+        """Check if the Docker image exists locally or can be pulled."""
+        logger.info(f"🔍 Checking for Docker image: {self.image}")
+
+        inspected = self._inspect()
+        if inspected is not None:
+            print("✓ Image found locally")
+            self._apply_labels(inspected)
             return True
-        except subprocess.CalledProcessError as e:
+
+        # Image not found locally, try to pull. The platform is unknown until
+        # the image has been inspected, so pull the host-native variant and let
+        # the labels decide; a target-architecture image without a host-native
+        # variant is retried explicitly below.
+        logger.warning("⚠️  Image not found locally, attempting to pull...")
+        logger.info(f"📥 Pulling image: {self.image}")
+
+        pulled = subprocess.run(['docker', 'pull', self.image]).returncode == 0
+        if not pulled and self.platform:
+            logger.info(f"   Retrying with platform {self.platform}")
+            pulled = subprocess.run(
+                ['docker', 'pull', '--platform', self.platform, self.image]
+            ).returncode == 0
+
+        if not pulled:
             logger.error(f"❌ Failed to pull image: {self.image}")
-            logger.error(f"💡 Check image name and tag are correct")
+            logger.error("💡 Check image name and tag are correct")
             return False
 
+        logger.info("✓ Successfully pulled image")
+        self._apply_labels(self._inspect())
+        return True
+
     def detect_ros_distro(self):
-        """Detect ROS distro from the Docker image name."""
+        """Determine the ROS distro, preferring the image label over the tag."""
+        labelled = self.labels.get(LABEL_ROS_DISTRO)
+        if labelled:
+            return labelled
+
         image_lower = self.image.lower()
-        if 'jazzy' in image_lower:
-            return 'jazzy'
-        elif 'humble' in image_lower:
-            return 'humble'
-        elif 'iron' in image_lower:
-            return 'iron'
-        else:
-            return 'jazzy'  # default
+        for distro in ('jazzy', 'humble', 'iron', 'rolling'):
+            if distro in image_lower:
+                return distro
+        logger.warning(
+            f"⚠️  Could not determine ROS distro from '{self.image}', assuming jazzy. "
+            f"Set the {LABEL_ROS_DISTRO} label on the image to be explicit.")
+        return 'jazzy'
+
+    def _native_command(self, build_dir, install_dir, extra_args):
+        """docker run for an image that runs as the target architecture."""
+        ros_distro = self.detect_ros_distro()
+        logger.info(f"✓ Using ROS {ros_distro}")
+
+        script = (
+            f'source /opt/ros/{ros_distro}/setup.bash && '
+            # Logs go into the mounted build base: under --user the container
+            # cannot write /workspace, and inside it they were lost anyway.
+            f'colcon --log-base {SDK_WORKSPACE}/cross_build/log build'
+            f' --build-base {SDK_WORKSPACE}/cross_build'
+            f' --install-base {SDK_WORKSPACE}/cross_install'
+            f' --merge-install {shlex.join(extra_args)}'
+        )
+
+        return [
+            'docker', 'run',
+            '--rm',
+            *_user_args(),
+            '--platform', self.platform,
+            '-v', f'{self.workspace_root}/src:{SDK_WORKSPACE}/src:ro',  # Read-only source
+            '-v', f'{build_dir}:{SDK_WORKSPACE}/cross_build',
+            '-v', f'{install_dir}:{SDK_WORKSPACE}/cross_install',
+            '-w', SDK_WORKSPACE,
+            self.image,
+            'bash', '-c', script,
+        ]
+
+    def _oe_sdk_command(self, build_dir, install_dir, extra_args):
+        """docker run for a cross SDK image, which runs on the host architecture."""
+        from colcon_buildx.toolchain import WRAPPER_NAME, write_wrapper
+
+        sources = ' && '.join(f'. {shlex.quote(p)}' for p in self.env_setup)
+
+        # The wrapper refers to $ENV{OE_CMAKE_TOOLCHAIN_FILE} rather than a path,
+        # so it can be written here on the host into the bind-mounted build base
+        # even though that variable only exists once the SDK is sourced in the
+        # container.
+        write_wrapper(build_dir / WRAPPER_NAME, SDK_INSTALL_DIR)
+        wrapper = f'{SDK_BUILD_DIR}/{WRAPPER_NAME}'
+
+        # CMAKE_TOOLCHAIN_FILE is passed through the environment rather than as
+        # --cmake-args: colcon's --cmake-args would collide with a user-supplied
+        # one, and CMake has honoured the environment variable since 3.21.
+        script = (
+            'set -e && '
+            f'{sources} && '
+            f'export ROS_WORKSPACE={SDK_WORKSPACE} && '
+            'if [ -z "$OE_CMAKE_TOOLCHAIN_FILE" ]; then '
+            '  echo "OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment:'
+            ' the SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in'
+            ' meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK'
+            ' when building the SDK" >&2; '
+            '  exit 1; '
+            'fi && '
+            f'export CMAKE_TOOLCHAIN_FILE={wrapper} && '
+            # Meta-ros SDKs ship ninja but not make. Use Ninja when the sourced
+            # environment has it and the user has not chosen a generator; an SDK
+            # without ninja keeps CMake's default.
+            'if [ -z "${CMAKE_GENERATOR:-}" ] && command -v ninja >/dev/null; then '
+            'export CMAKE_GENERATOR=Ninja; fi && '
+            f'colcon --log-base {SDK_BUILD_DIR}/log build'
+            f' --build-base {SDK_BUILD_DIR}'
+            f' --install-base {SDK_INSTALL_DIR}'
+            f' --merge-install {shlex.join(extra_args)}'
+        )
+
+        # No --platform: the SDK cross-compiles, so the container should run the
+        # host-native variant of the manifest rather than be emulated.
+        return [
+            'docker', 'run',
+            '--rm',
+            *_user_args(),
+            '-v', f'{self.workspace_root}/src:{SDK_WORKSPACE}/src:ro',  # Read-only source
+            '-v', f'{build_dir}:{SDK_BUILD_DIR}',
+            '-v', f'{install_dir}:{SDK_INSTALL_DIR}',
+            '-w', SDK_WORKSPACE,
+            self.image,
+            'bash', '-c', script,
+        ]
 
     def build(self, extra_args=None):
         """Execute colcon build inside Docker container."""
@@ -255,12 +407,9 @@ class DockerBuilder:
         if not self.check_docker():
             return 1
 
-        # Check/pull image
+        # Check/pull image; this is what populates the labels
         if not self.check_image_exists():
             return 1
-
-        ros_distro = self.detect_ros_distro()
-        logger.info(f"✓ Using ROS {ros_distro}")
 
         # Prepare build directories
         build_dir = self.workspace_root / self.build_base
@@ -268,33 +417,18 @@ class DockerBuilder:
         build_dir.mkdir(parents=True, exist_ok=True)
         install_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build command to run inside container
-        colcon_cmd = ' '.join([
-            'bash -c "',
-            f'source /opt/ros/{ros_distro}/setup.bash &&',
-            'colcon build',
-            '--build-base /workspace/cross_build',
-            '--install-base /workspace/cross_install',
-            '--merge-install',
-        ] + extra_args + ['"'])
+        if self.kind == KIND_OE_SDK:
+            if not self.env_setup:
+                logger.error(f"❌ Cross SDK image has no {LABEL_ENV_SETUP} label")
+                return 1
+            docker_cmd = self._oe_sdk_command(build_dir, install_dir, extra_args)
+        else:
+            docker_cmd = self._native_command(build_dir, install_dir, extra_args)
 
-        # Docker run command
-        docker_cmd = [
-            'docker', 'run',
-            '--rm',
-            '--platform', self.platform,
-            '-v', f'{self.workspace_root}/src:/workspace/src:ro',  # Read-only source
-            '-v', f'{build_dir}:/workspace/cross_build',
-            '-v', f'{install_dir}:/workspace/cross_install',
-            '-w', '/workspace',
-            self.image,
-            'bash', '-c',
-            f'source /opt/ros/{ros_distro}/setup.bash && colcon build --build-base /workspace/cross_build --install-base /workspace/cross_install --merge-install {" ".join(extra_args)}'
-        ]
-
-        logger.info(f"🚀 Starting Docker container...")
+        logger.info("🚀 Starting Docker container...")
         logger.info(f"   Image: {self.image}")
-        logger.info(f"   Platform: {self.platform}")
+        logger.info(f"   Kind: {self.kind}")
+        logger.info(f"   Platform: {'host-native' if self.kind == KIND_OE_SDK else self.platform}")
         logger.info(f"   Workspace: {self.workspace_root}")
         logger.info(f"   Build args: {' '.join(extra_args)}")
 
