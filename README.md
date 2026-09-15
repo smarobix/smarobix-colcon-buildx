@@ -47,13 +47,13 @@ colcon buildx --method sdk \
 **From any host, with the SDK packaged as a Docker image** (`--method docker`):
 
 ```bash
-colcon buildx --method docker --docker-image k26-oesdk:jazzy
+colcon buildx --method docker --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-oesdk-jazzy
 ```
 
 **Natively, in a dev container built by bitbake** from the same configuration as the board image (`buildx-docker-images/yocto`, recipe `ros-dev-container`). It runs *as* the target architecture, so it goes through the normal Docker path with no cross toolchain involved. It also includes the Python message generator, so unlike the SDK routes, interface packages get Python bindings too:
 
 ```bash
-colcon buildx --method docker --docker-image ros-dev-container:jazzy --docker-platform linux/arm64
+colcon buildx --method docker --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-yocto-jazzy --docker-platform linux/arm64
 ```
 
 An SDK image carries a cross toolchain and the target sysroot and runs on the **host** architecture. colcon-buildx recognises it by these image labels, skips `--platform`, and sources the SDK instead of `/opt/ros/<distro>/setup.bash`:
@@ -65,7 +65,12 @@ An SDK image carries a cross toolchain and the target sysroot and runs on the **
 | `org.smarobix.buildx.target-platform` | `linux/arm64` |
 | `org.smarobix.buildx.ros-distro` | `jazzy` |
 
-`buildx-docker-images/dockerfiles/k26-oesdk` builds one for the Kria K26.
+`buildx-docker-images/dockerfiles/oesdk` builds one from a meta-ros SDK. Published images, all under `ghcr.io/smarobix/smarobix-buildx-images`:
+
+| Board | SDK image | Dev container |
+|---|---|---|
+| Kria K26 (KV260 / KR260) | `k26-oesdk-jazzy` | `k26-yocto-jazzy` |
+| Raspberry Pi 5 | `rpi5-oesdk-jazzy` | `rpi5-yocto-jazzy` |
 
 What the SDK has to contain, and what colcon-buildx takes care of:
 
