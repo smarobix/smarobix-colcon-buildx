@@ -31,7 +31,7 @@ Most of this README covers the Docker backend with images that run as the target
 
 ## Where the Docker images come from
 
-The companion repository [`smarobix/smarobix-buildx-images`](https://github.com/smarobix/smarobix-buildx-images) builds and publishes board-specific Docker images that work with `colcon buildx` out of the box (Kria K26 today, Pynq-Z1 / Pynq-Z2 in progress). You can also bring your own. Any image with ROS 2 installed under `/opt/ros/<distro>` and a working colcon will work.
+The companion repository [`smarobix/smarobix-buildx-images`](https://github.com/smarobix/smarobix-buildx-images) builds and publishes board-specific Docker images that work with `colcon buildx` out of the box (Kria K26, Pynq-Z1 / Pynq-Z2, Raspberry Pi / Debian). You can also bring your own. Any image with ROS 2 installed under `/opt/ros/<distro>` and a working colcon will work.
 
 ## Yocto / meta-ros targets
 
@@ -243,4 +243,4 @@ The repository still ships a 269-line standalone bash script at `bin/kria-build`
 
 ## License
 
-License to be finalized before public release.
+Apache License 2.0, as declared in `pyproject.toml`.

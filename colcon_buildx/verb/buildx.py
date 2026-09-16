@@ -119,7 +119,7 @@ class BuildxVerb(VerbExtensionPoint):
         docker_group = parser.add_argument_group('Docker Options (--method docker)')
         docker_group.add_argument(
             '--docker-image',
-            help='Docker image for cross-compilation (e.g., sapertuz/smrbx-buildx:kv26-jazzy)'
+            help='Docker image for cross-compilation (e.g., ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy)'
         )
         docker_group.add_argument(
             '--docker-platform',
@@ -283,7 +283,7 @@ class BuildxVerb(VerbExtensionPoint):
                 # Docker-based cross-compilation
                 if not args.docker_image:
                     logger.error("❌ --docker-image is required for docker method")
-                    logger.info("💡 Example: --docker-image sapertuz/smrbx-buildx:kv26-jazzy")
+                    logger.info("💡 Example: --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy")
                     return 1
 
                 from colcon_buildx.docker import DockerBuilder
