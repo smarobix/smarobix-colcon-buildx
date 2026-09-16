@@ -6,7 +6,7 @@ set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
 SCRIPT_NAME="kria-build"
-REPO_URL="git@gitlab.com:smarobix/research-and-development/fpga/kria_ros_buildx_compile.git"
+REPO_URL="https://github.com/smarobix/smarobix-colcon-buildx.git"
 
 echo "🚀 Installing Kria Build Tool..."
 
@@ -47,6 +47,6 @@ echo "  1. Verify installation: kria-build --help"
 echo "  2. Enable ARM64 emulation (x86_64 only):"
 echo "     docker run --rm --privileged multiarch/qemu-user-static --reset -p yes"
 echo "  3. Pull Docker image:"
-echo "     docker pull --platform linux/arm64 sapertuz/smrbx-buildx:kv26-jazzy"
+echo "     docker pull --platform linux/arm64 ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy"
 echo "  4. Navigate to your ROS 2 workspace and run: kria-build --dry-run"
 echo ""

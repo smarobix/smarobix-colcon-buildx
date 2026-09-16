@@ -5,7 +5,7 @@
 method: docker
 
 # Docker Method Configuration
-docker_image: sapertuz/smrbx-buildx:kv26-jazzy
+docker_image: ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy
 docker_platform: linux/arm64
 
 # SSHFS Sysroot Method (alternative - uncomment to use)

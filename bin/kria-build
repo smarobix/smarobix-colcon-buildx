@@ -6,7 +6,7 @@ set -e
 
 # Default configuration
 CONTAINER_NAME=ros2-kria-builder
-IMAGE_NAME="sapertuz/smrbx-buildx:kv26-jazzy"
+IMAGE_NAME="ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy"
 SYNC_TARGET=""
 DRY_RUN=false
 ROS_DISTRO=jazzy  # Auto-detected from image name
@@ -152,7 +152,7 @@ Prerequisites (x86_64 hosts):
      docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
   2. Pull the Docker image:
-     docker pull --platform linux/arm64 sapertuz/smrbx-buildx:kv26-jazzy
+     docker pull --platform linux/arm64 ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy
 
 For more information, see:
   https://git.smarobox.de/smarobix/kria-build-tools

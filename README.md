@@ -31,7 +31,7 @@ Most of this README covers the Docker backend with images that run as the target
 
 ## Where the Docker images come from
 
-The companion repository [`smarobix/buildx-docker-images`](https://github.com/smarobix/buildx-docker-images) builds and publishes board-specific Docker images that work with `colcon buildx` out of the box (Kria K26 today, Pynq-Z1 / Pynq-Z2 in progress). You can also bring your own. Any image with ROS 2 installed under `/opt/ros/<distro>` and a working colcon will work.
+The companion repository [`smarobix/smarobix-buildx-images`](https://github.com/smarobix/smarobix-buildx-images) builds and publishes board-specific Docker images that work with `colcon buildx` out of the box (Kria K26, Pynq-Z1 / Pynq-Z2, Raspberry Pi / Debian). You can also bring your own. Any image with ROS 2 installed under `/opt/ros/<distro>` and a working colcon will work.
 
 ## Yocto / meta-ros targets
 
@@ -50,7 +50,7 @@ colcon buildx --method sdk \
 colcon buildx --method docker --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-oesdk-jazzy
 ```
 
-**Natively, in a dev container built by bitbake** from the same configuration as the board image (`buildx-docker-images/yocto`, recipe `ros-dev-container`). It runs *as* the target architecture, so it goes through the normal Docker path with no cross toolchain involved. It also includes the Python message generator, so unlike the SDK routes, interface packages get Python bindings too:
+**Natively, in a dev container built by bitbake** from the same configuration as the board image (the images repo's `yocto/`, recipe `ros-dev-container`). It runs *as* the target architecture, so it goes through the normal Docker path with no cross toolchain involved. It also includes the Python message generator, so unlike the SDK routes, interface packages get Python bindings too:
 
 ```bash
 colcon buildx --method docker --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-yocto-jazzy --docker-platform linux/arm64
@@ -65,7 +65,7 @@ An SDK image carries a cross toolchain and the target sysroot and runs on the **
 | `org.smarobix.buildx.target-platform` | `linux/arm64` |
 | `org.smarobix.buildx.ros-distro` | `jazzy` |
 
-`buildx-docker-images/dockerfiles/oesdk` builds one from a meta-ros SDK. Published images, all under `ghcr.io/smarobix/smarobix-buildx-images`:
+The images repo's `dockerfiles/oesdk` builds one from a meta-ros SDK. Published images, all under `ghcr.io/smarobix/smarobix-buildx-images`:
 
 | Board | SDK image | Dev container |
 |---|---|---|
@@ -92,14 +92,14 @@ Use `setup.sh`, not `setup.bash`: minimal Yocto images often have no bash.
 ## Installation
 
 ```bash
-pip install git+ssh://git@gitlab.com/smarobix/research-and-development/fpga/kria_ros_buildx_compile.git
+pip install "git+https://github.com/smarobix/smarobix-colcon-buildx.git"
 ```
 
 For local development:
 
 ```bash
-git clone git@github.com:smarobix/colcon-buildx.git
-cd colcon-buildx
+git clone git@github.com:smarobix/smarobix-colcon-buildx.git
+cd smarobix-colcon-buildx
 pip install -e .
 colcon buildx --help
 ```
@@ -125,7 +125,7 @@ In your ROS 2 workspace root, drop a `.buildx.conf`:
 
 ```bash
 method = docker
-docker_image = sapertuz/smrbx-buildx:kv26-jazzy
+docker_image = ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy
 docker_platform = linux/arm64
 deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
 ```
@@ -143,12 +143,12 @@ For an `armhf` board (Pynq-Z1 example):
 
 ```bash
 method = docker
-docker_image = sapertuz/smrbx-buildx:pynq-z1-jazzy
+docker_image = ghcr.io/smarobix/smarobix-buildx-images:pynq-v3.1.1-jazzy
 docker_platform = linux/arm/v7
 deploy_target = xilinx@192.168.2.99:~/ros2_ws/install/
 ```
 
-See [`buildx-docker-images`](https://github.com/smarobix/buildx-docker-images) for the full list of available image tags.
+See [`smarobix-buildx-images`](https://github.com/smarobix/smarobix-buildx-images) for the full list of available image tags.
 
 ## Configuration
 
@@ -158,7 +158,7 @@ Two formats are supported, both with the same keys.
 
 ```bash
 method = docker
-docker_image = sapertuz/smrbx-buildx:kv26-jazzy
+docker_image = ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy
 docker_platform = linux/arm64
 build_base = cross_build
 install_base = cross_install
@@ -170,7 +170,7 @@ deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
 
 ```yaml
 method: docker
-docker_image: sapertuz/smrbx-buildx:pynq-z1-jazzy
+docker_image: ghcr.io/smarobix/smarobix-buildx-images:pynq-v3.1.1-jazzy
 docker_platform: linux/arm/v7
 build_base: cross_build
 install_base: cross_install
@@ -243,4 +243,4 @@ The repository still ships a 269-line standalone bash script at `bin/kria-build`
 
 ## License
 
-License to be finalized before public release.
+Apache License 2.0, as declared in `pyproject.toml`.

@@ -1,2 +1,0 @@
-[colcon_core.verb]
-buildx = colcon_buildx.verb.buildx:BuildxVerb
