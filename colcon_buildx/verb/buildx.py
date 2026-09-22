@@ -3,7 +3,6 @@
 
 """Cross-compilation build verb for colcon."""
 
-import os
 from pathlib import Path
 
 from colcon_core.plugin_system import satisfies_version
@@ -24,7 +23,9 @@ DEFAULTS = {
     'build_base': 'cross_build',
     'install_base': 'cross_install',
     'docker_platform': 'linux/arm64',
-    'sysroot_mount': os.path.expanduser('~/mnt/board-sysroot'),
+    # Kept unexpanded so --help and the docs show it as written; the sysroot
+    # builder expands it.
+    'sysroot_mount': '~/mnt/board-sysroot',
     'rosdep_args': '--ignore-src -y',
     'deploy': False,
     'install_deps': False,
