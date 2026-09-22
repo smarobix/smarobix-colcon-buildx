@@ -89,6 +89,7 @@ def test_docker_builder_passes_its_platform_to_the_sync(tmp_path, monkeypatch):
         return base_image + '-synced-20260922'
 
     monkeypatch.setattr(package_sync, 'sync_packages_from_device', sync)
+    monkeypatch.setattr(docker.DockerBuilder, '_inspect', lambda self, image=None: None)
     builder = docker.DockerBuilder(
         IMAGE, 'linux/arm/v7', 'cross_build', 'cross_install', use_base_image=True)
     builder.create_synced_image('ubuntu@10.42.0.3')

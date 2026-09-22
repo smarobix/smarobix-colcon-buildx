@@ -207,9 +207,11 @@ class SysrootBuilder:
 
             logger.info(f"🔨 Building with: colcon build {' '.join(extra_args)}")
 
-            # Set up environment and run
+            # Set up environment and run. colcon runs from the workspace root,
+            # like the other methods, so that it finds every package and the
+            # relative build and install bases land where --deploy looks.
             env = self.setup_environment()
-            result = subprocess.run(cmd, env=env)
+            result = subprocess.run(cmd, env=env, cwd=self.workspace_root)
 
             return result.returncode
 

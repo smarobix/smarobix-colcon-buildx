@@ -103,6 +103,11 @@ if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
 fi
 rosdep update
 
+# The images delete their apt lists to stay small, and rosdep installs with
+# apt-get install, which cannot find anything without them.
+echo "Updating package lists..."
+apt-get update -qq
+
 echo "Installing workspace dependencies..."
 cd /workspace
 rosdep install --from-paths src {rosdep_args}
@@ -114,43 +119,37 @@ rm -rf /var/lib/apt/lists/*
 echo "Dependencies installed successfully!"
 """
 
-    print("🔄 Creating temporary container to install dependencies...")
-
-    # Create container with workspace mounted
-    create_cmd = [
-        'docker', 'create',
-        '--platform', platform,
+    # The script runs once, as the container's own command, in a container
+    # kept after it exits so it can be committed. It used to be the command of
+    # a container that was then started *and* run again with docker exec, so
+    # two copies raced for the apt lock, or the exec found the container
+    # already stopped.
+    container_name = f"buildx-rosdep-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    run_cmd = [
+        'docker', 'run',
+        '--name', container_name,
+        *(['--platform', platform] if platform else []),
         '-v', f'{workspace_path}:/workspace:ro',
         image,
         'bash', '-c', install_script
     ]
 
     try:
-        result = subprocess.run(create_cmd, capture_output=True, text=True, check=True)
-        container_id = result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to create container: {e.stderr}")
-
-    try:
-        # Start container
-        subprocess.run(['docker', 'start', container_id], check=True, capture_output=True)
-
-        # Run installation
-        print("📦 Running rosdep install...")
-        exec_result = subprocess.run(
-            ['docker', 'exec', container_id, 'bash', '-c', install_script],
+        print("📦 Running rosdep install in a temporary container...")
+        run_result = subprocess.run(
+            run_cmd,
             capture_output=True,
             text=True,
             timeout=600  # 10 minutes timeout
         )
 
-        if exec_result.returncode != 0:
-            print(f"❌ Dependency installation failed:")
-            print(exec_result.stderr)
+        if run_result.returncode != 0:
+            print("❌ Dependency installation failed:")
+            print(run_result.stderr)
             raise RuntimeError("rosdep install failed")
 
         # Show relevant output
-        for line in exec_result.stdout.split('\n'):
+        for line in run_result.stdout.split('\n'):
             if 'Installing' in line or 'installed' in line or 'already installed' in line:
                 print(f"  {line}")
 
@@ -158,7 +157,7 @@ echo "Dependencies installed successfully!"
 
         # Commit container to new synced image
         new_tag = generate_synced_tag(image)
-        commit_synced_image(container_id, new_tag)
+        commit_synced_image(container_name, new_tag)
 
         # Update manifest
         manifest_path = workspace_path / '.buildx-sync-manifest.json'
@@ -186,8 +185,8 @@ echo "Dependencies installed successfully!"
         raise RuntimeError("rosdep install timed out after 10 minutes")
     finally:
         # Clean up container
-        subprocess.run(['docker', 'rm', '-f', container_id],
-                      capture_output=True, check=False)
+        subprocess.run(['docker', 'rm', '-f', container_name],
+                       capture_output=True, check=False)
 
 
 def install_deps_sshfs(

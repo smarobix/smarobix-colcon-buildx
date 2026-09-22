@@ -325,6 +325,12 @@ class BuildxVerb(VerbExtensionPoint):
 
         logger.info(f"🔧 Cross-compilation method: {args.method}")
 
+        # Checked before a build that can take an hour, not after it.
+        if args.deploy and not args.deploy_target:
+            logger.error("❌ --deploy-target is required when --deploy is used")
+            logger.error("💡 Example: --deploy-target ubuntu@10.42.0.3:~/ros2_ws/install/")
+            return 1
+
         workspace_root = _workspace_root()
 
         try:
@@ -461,14 +467,9 @@ class BuildxVerb(VerbExtensionPoint):
 
             # Optional deployment
             if args.deploy:
-                if not args.deploy_target:
-                    logger.error("❌ --deploy-target is required when --deploy is used")
-                    logger.error("💡 Example: --deploy-target ubuntu@10.42.0.3:~/ros2_ws/install/")
-                    return 1
-
                 from colcon_buildx.deployment import deploy
                 logger.info(f"🚀 Deploying to {args.deploy_target}...")
-                deploy_result = deploy(args.install_base, args.deploy_target)
+                deploy_result = deploy(args.install_base, args.deploy_target, workspace_root)
                 if deploy_result != 0:
                     logger.error("❌ Deployment failed")
                     return deploy_result

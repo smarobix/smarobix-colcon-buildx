@@ -254,3 +254,36 @@ def test_toolchain_is_ignored_with_a_warning_by_a_native_image(workspace, caplog
         cmd = builder._native_command(workspace / 'b', workspace / 'i', [])
     assert 'my-toolchain' not in ' '.join(cmd)
     assert 'Ignoring --toolchain' in caplog.text
+
+
+# --- synced images and cross SDK images ---------------------------------------
+
+def test_synced_image_must_come_from_the_same_repository(workspace, monkeypatch):
+    base = 'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy'
+    listing = 'docker.io/someone/mirror:k26-jazzy-synced-20260922\n'
+
+    def run(cmd, **kwargs):
+        return docker.subprocess.CompletedProcess(cmd, 0, stdout=listing)
+
+    monkeypatch.setattr(docker.subprocess, 'run', run)
+    builder = docker.DockerBuilder(base, 'linux/arm64', 'cross_build', 'cross_install')
+    assert builder.image == base
+
+
+def test_cross_sdk_image_cannot_be_synced_from_a_device(workspace, monkeypatch):
+    from colcon_buildx import package_sync
+
+    monkeypatch.setattr(docker.DockerBuilder, '_inspect', lambda self, image=None: OE_SDK_IMAGE)
+    monkeypatch.setattr(package_sync, 'sync_packages_from_device',
+                        lambda *a, **k: pytest.fail('synced a cross SDK image'))
+    assert _builder().create_synced_image('ubuntu@10.42.0.3') is None
+
+
+def test_install_deps_leaves_a_cross_sdk_image_alone(workspace, monkeypatch):
+    from colcon_buildx import rosdep_manager
+
+    monkeypatch.setattr(docker.DockerBuilder, '_inspect', lambda self, image=None: OE_SDK_IMAGE)
+    monkeypatch.setattr(rosdep_manager, 'install_deps_docker',
+                        lambda *a, **k: pytest.fail('ran rosdep in a cross SDK image'))
+    builder = _builder()
+    assert builder.install_dependencies() == builder.image

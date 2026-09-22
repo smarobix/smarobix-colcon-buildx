@@ -11,18 +11,22 @@ from colcon_core.logging import colcon_logger
 logger = colcon_logger.getChild(__name__)
 
 
-def deploy(install_dir, target):
+def deploy(install_dir, target, workspace_root=None):
     """
     Deploy build artifacts to target board via rsync.
 
     Args:
-        install_dir: Local install directory to deploy
+        install_dir: Local install directory to deploy; a relative path is
+            taken relative to *workspace_root*, where the builders put it
         target: Deployment target in format user@host:/path/to/install
+        workspace_root: Workspace root; the current directory if not given
 
     Returns:
         int: Exit code (0 for success)
     """
-    install_path = Path(install_dir)
+    # Resolving against the current directory instead missed the install
+    # directory whenever colcon buildx ran from below the workspace root.
+    install_path = Path(workspace_root or Path.cwd()) / install_dir
 
     if not install_path.exists():
         logger.error(f"❌ Install directory not found: {install_path}")

@@ -134,7 +134,10 @@ class DockerBuilder:
 
                     logger.debug(f"   Checking: {line} → repo={repo}, tag={tag}, pattern={regex_pattern}, match={bool(is_match)}")
 
-                    if is_match:
+                    # generate_synced_tag keeps the repository, so a synced
+                    # copy of this image lives in the same one. The same tag in
+                    # another repository, a mirror say, is a different image.
+                    if is_match and repo == registry_and_repo:
                         synced_images.append((tag, line))
 
             if synced_images:
@@ -181,6 +184,15 @@ class DockerBuilder:
         """
         from colcon_buildx.package_sync import sync_packages_from_device
 
+        if self._is_cross_sdk(self.base_image):
+            logger.error(
+                f"❌ {self.base_image} is a cross SDK image: it runs on the host, so its "
+                "Debian packages are not the target's and cannot be synced to a board.")
+            logger.error(
+                "💡 The target's libraries come from the SDK's sysroot, which is fixed "
+                "when the SDK is built.")
+            return None
+
         manifest_path = self.workspace_root / '.buildx-sync-manifest.json'
 
         try:
@@ -206,6 +218,12 @@ class DockerBuilder:
             New synced image tag with dependencies installed, or None if failed
         """
         from colcon_buildx.rosdep_manager import install_deps_docker
+
+        if self._is_cross_sdk(self.image):
+            logger.warning(
+                f"⚠ Ignoring --install-deps: {self.image} is a cross SDK image. Its "
+                "sysroot is fixed when the SDK is built; rosdep cannot add to it.")
+            return self.image
 
         try:
             # Use current image (could be base or already synced)
@@ -234,13 +252,17 @@ class DockerBuilder:
             logger.error("💡 Install Docker: https://docs.docker.com/get-docker/")
             return False
 
-    def _inspect(self):
-        """Return the `docker image inspect` object for the image, or None."""
-        result = subprocess.run(
-            ['docker', 'image', 'inspect', self.image],
-            capture_output=True,
-            text=True
-        )
+    def _inspect(self, image=None):
+        """Return the `docker image inspect` object for *image*, or None."""
+        try:
+            result = subprocess.run(
+                ['docker', 'image', 'inspect', image or self.image],
+                capture_output=True,
+                text=True
+            )
+        except FileNotFoundError:
+            logger.debug("   docker not found")
+            return None
         if result.returncode != 0:
             logger.debug(f"   docker inspect return code: {result.returncode}")
             logger.debug(f"   stderr: {result.stderr}")
@@ -251,6 +273,16 @@ class DockerBuilder:
             logger.debug(f"   could not parse inspect output: {e}")
             return None
         return parsed[0] if parsed else None
+
+    def _is_cross_sdk(self, image):
+        """
+        Return True if *image* is a local cross SDK image.
+
+        An image that is not local yet cannot be told apart, and is taken not to
+        be one; the operation that needs it pulls it and goes ahead.
+        """
+        labels = ((self._inspect(image) or {}).get('Config') or {}).get('Labels') or {}
+        return labels.get(LABEL_KIND) == KIND_OE_SDK
 
     def _apply_labels(self, inspected):
         """Read buildx labels off an inspected image and configure from them."""
