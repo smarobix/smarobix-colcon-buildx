@@ -27,7 +27,7 @@ Keys may be written with hyphens instead of underscores. Keys whose flag takes n
 
 These have no config key, and can only be given on the command line:
 
-- `--config FILE`: Read settings from FILE instead of searching for a config file; see "Configuration files" below
+- `--config FILE`: Read settings from FILE instead of searching for a config file; see the Notes below
 - `--sync-from-device SSH_TARGET`: Read the board's installed Debian packages over SSH, install the same versions into a copy of --docker-image, tag it &lt;tag&gt;-synced-YYYYMMDD, and exit without building. E.g. ubuntu@10.42.0.3. Not for cross SDK images
 - `--install-deps-on-device SSH_TARGET`: Copy src/ to the board, run rosdep install there over SSH, and exit without building. sudo on the board may ask for a password. Works with any --method. E.g. ubuntu@10.42.0.3
 - `colcon_args`: Further arguments for colcon build, e.g. --packages-select my_package

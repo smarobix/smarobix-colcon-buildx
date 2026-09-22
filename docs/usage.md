@@ -22,7 +22,7 @@ colcon buildx
 
 colcon-buildx prints the config file it read and the image it is using, pulls the image if it isn't local yet, and runs `colcon build` inside it with your `src/` mounted read-only.
 
-The results go to `cross_build/` and `cross_install/`. They are kept apart from a native `build/` and `install/`, so a host build and a cross build in the same workspace don't overwrite each other. colcon's logs go to `cross_build/log/`. The container runs as your user, so you own everything it writes and can delete it without sudo.
+The results go to `cross_build/` and `cross_install/`. They are kept apart from a native `build/` and `install/`, so a host build and a cross build in the same workspace don't overwrite each other. colcon's logs go to `cross_build/log/`, and colcon-buildx's own run log goes to `log/` at the workspace root. The container runs as your user, so you own everything it writes and can delete it without sudo.
 
 To copy the result to the board after the build, add `--deploy`. It uses `rsync --delete`, so read [Deploy](sync-and-deploy.md#deploy) first.
 

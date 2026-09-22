@@ -33,7 +33,7 @@ usage: colcon buildx [-h] [--method {docker,sysroot,sdk}] [--config FILE]
 |---|---|---|
 | `-h`, `--help` |  | show this help message and exit |
 | `--method {docker,sysroot,sdk}` | `docker` | How to build: docker builds in a container image; sdk builds against a Yocto/OE SDK installed on this Linux host; sysroot builds against the board's root filesystem mounted over SSHFS (experimental). Default: docker |
-| `--config FILE` | unset | Read settings from FILE instead of searching for a config file; see "Configuration files" below |
+| `--config FILE` | unset | Read settings from FILE instead of searching for a config file; see the Notes below |
 | `--build-base DIR` | `cross_build` | Build directory, relative to the workspace root (default: cross_build) |
 | `--install-base DIR` | `cross_install` | Install directory, relative to the workspace root; --deploy copies it to the board (default: cross_install) |
 | `--toolchain FILE` | unset | CMake toolchain file. Required for --method sysroot. With --method sdk, or --method docker and a cross SDK image, it replaces the SDK's own toolchain file (OE_CMAKE_TOOLCHAIN_FILE); for an image, give the path inside the container. Images that run as the target ignore it |
