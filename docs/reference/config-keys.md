@@ -8,26 +8,26 @@ Keys may be written with hyphens instead of underscores. Keys whose flag takes n
 
 | Key | Default | Flag | Description |
 |---|---|---|---|
-| `build_base` | `cross_build` | `--build-base BUILD_BASE` | Build directory for cross-compiled artifacts (default: cross_build) |
-| `deploy` | `false` | `--deploy` | Deploy build results to target board after successful build |
-| `deploy_target` | unset | `--deploy-target DEPLOY_TARGET` | Deployment target in format user@host:/path/to/install (e.g., ubuntu@10.42.0.3:~/ros2_ws/install/) |
-| `docker_image` | unset | `--docker-image DOCKER_IMAGE` | Docker image for cross-compilation (e.g., ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy) |
-| `docker_platform` | `linux/arm64` | `--docker-platform DOCKER_PLATFORM` | Target platform for Docker (default: linux/arm64). Ignored for cross SDK images, which run on the host architecture. |
-| `emit_mixin` | `false` | `--emit-mixin` | Write a colcon mixin describing the SDK cross-build settings, for use with plain `colcon build --mixin` outside this extension |
-| `install_base` | `cross_install` | `--install-base INSTALL_BASE` | Install directory for cross-compiled artifacts (default: cross_install) |
-| `install_deps` | `false` | `--install-deps` | Install workspace dependencies using rosdep in Docker image (for dev only, see --install-deps-on-device) |
-| `install_deps_on_device` | unset | `--install-deps-on-device SSH_TARGET` | Install workspace dependencies on target device via SSH (e.g., ubuntu@10.42.0.3). Recommended before --sync-from-device. |
-| `method` | `docker` | `--method {docker,sysroot,sdk}` | Build method: docker (container-based), sysroot (SSHFS mount), or sdk (Yocto/OpenEmbedded SDK on this host). Default: docker |
-| `no_mount` | `false` | `--no-mount` | Skip SSHFS mounting (assume sysroot already mounted) |
-| `rosdep_args` | `--ignore-src -y` | `--rosdep-args ROSDEP_ARGS` | Additional arguments to pass to rosdep install (default: --ignore-src -y) |
-| `sdk_env` | unset | `--sdk-env SDK_ENV` | Colon-separated list of SDK scripts to source, in order (e.g. /opt/ros-sdk/environment-setup-cortexa72-cortexa53-poky-linux) |
-| `sync_from_device` | unset | `--sync-from-device SSH_TARGET` | Sync package versions from target device (e.g., ubuntu@192.168.1.100). Creates local synced image. |
-| `sysroot_host` | unset | `--sysroot-host SYSROOT_HOST` | Hostname or IP of the target board for sysroot access (e.g., kria-vision-home) |
-| `sysroot_mount` | `~/mnt/board-sysroot` | `--sysroot-mount SYSROOT_MOUNT` | Local mount point for board sysroot (default: ~/mnt/board-sysroot) |
-| `toolchain` | unset | `--toolchain TOOLCHAIN` | Path to CMake toolchain file (required for sysroot method) |
-| `use_base_image` | `false` | `--use-base-image` | Force use of base image, skip auto-detection of synced images |
+| `build_base` | `cross_build` | `--build-base DIR` | Build directory, relative to the workspace root (default: cross_build) |
+| `deploy` | `false` | `--deploy` | After a successful build, copy the install directory to --deploy-target with rsync --delete, which removes files there that are not in the local install directory |
+| `deploy_target` | unset | `--deploy-target TARGET` | rsync destination for --deploy, as user@host:path, e.g. ubuntu@10.42.0.3:~/ros2_ws/install/ |
+| `docker_image` | unset | `--docker-image IMAGE` | Image to build in; required for --method docker, e.g. ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy. If a local &lt;tag&gt;-synced-YYYYMMDD copy of it exists, made by --sync-from-device or --install-deps, the newest one is used instead |
+| `docker_platform` | `linux/arm64` | `--docker-platform PLATFORM` | Docker platform of the target, which the image runs as: linux/arm64, or linux/arm/v7 for armhf boards. Also used by --sync-from-device and --install-deps. Cross SDK images ignore it and run on the host architecture (default: linux/arm64) |
+| `emit_mixin` | `false` | `--emit-mixin` | Also write a colcon mixin with the SDK cross-build settings to .buildx/mixin/ in the workspace, for a plain `colcon build --mixin buildx` |
+| `install_base` | `cross_install` | `--install-base DIR` | Install directory, relative to the workspace root; --deploy copies it to the board (default: cross_install) |
+| `install_deps` | `false` | `--install-deps` | Run rosdep install for the workspace before building. --method docker: installs into a new local image, &lt;tag&gt;-synced-YYYYMMDD, and not on the board. --method sysroot: installs on the board (--sysroot-host) over SSH. --method sdk: ignored, as the SDK sysroot is fixed when the SDK is built. To install on the board and match the image to it, use --install-deps-on-device, then --sync-from-device |
+| `method` | `docker` | `--method {docker,sysroot,sdk}` | How to build: docker builds in a container image; sdk builds against a Yocto/OE SDK installed on this Linux host; sysroot builds against the board's root filesystem mounted over SSHFS (experimental). Default: docker |
+| `no_mount` | `false` | `--no-mount` | Use a sysroot already mounted at --sysroot-mount instead of mounting it |
+| `rosdep_args` | `--ignore-src -y` | `--rosdep-args ARGS` | Arguments for rosdep install, used by --install-deps and --install-deps-on-device. Pass them as one word, e.g. --rosdep-args="--ignore-src -y -r" (default: --ignore-src -y) |
+| `sdk_env` | unset | `--sdk-env SCRIPTS` | SDK environment script to source; several are separated by colons and sourced in order. Required for --method sdk, e.g. /opt/ros-sdk/environment-setup-cortexa72-cortexa53-oe-linux |
+| `sysroot_host` | unset | `--sysroot-host HOST` | Board whose root filesystem is mounted over SSHFS, as host or user@host, e.g. my-board. Required for --method sysroot |
+| `sysroot_mount` | `~/mnt/board-sysroot` | `--sysroot-mount DIR` | Local mount point for the board's root filesystem (default: ~/mnt/board-sysroot) |
+| `toolchain` | unset | `--toolchain FILE` | CMake toolchain file. Required for --method sysroot. With --method sdk, or --method docker and a cross SDK image, it replaces the SDK's own toolchain file (OE_CMAKE_TOOLCHAIN_FILE); for an image, give the path inside the container. Images that run as the target ignore it |
+| `use_base_image` | `false` | `--use-base-image` | Build in --docker-image itself, even if a local -synced- copy of it exists |
 
 These have no config key, and can only be given on the command line:
 
-- `--config CONFIG`: Configuration file (default: search for .buildx.conf or .buildx.yml in workspace)
-- `colcon_args`: Additional arguments to pass to colcon build (e.g., --packages-select my_package)
+- `--config FILE`: Read settings from FILE instead of searching for a config file; see "Configuration files" below
+- `--sync-from-device SSH_TARGET`: Read the board's installed Debian packages over SSH, install the same versions into a copy of --docker-image, tag it &lt;tag&gt;-synced-YYYYMMDD, and exit without building. E.g. ubuntu@10.42.0.3. Not for cross SDK images
+- `--install-deps-on-device SSH_TARGET`: Copy src/ to the board, run rosdep install there over SSH, and exit without building. sudo on the board may ask for a password. Works with any --method. E.g. ubuntu@10.42.0.3
+- `colcon_args`: Further arguments for colcon build, e.g. --packages-select my_package
