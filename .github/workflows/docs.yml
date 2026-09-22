@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2025-2026 SMAROBIX GmbH
+# SPDX-License-Identifier: Apache-2.0
+
+name: Docs
+
+# The reference pages are generated from the code, so a change to an option or
+# a default has to come with the regenerated page. README.md and this file are
+# listed too: the link check reads the README, and a change here should be
+# tested here.
+on:
+  pull_request:
+    paths:
+      - 'colcon_buildx/**'
+      - 'docs/**'
+      - 'tools/**'
+      - 'README.md'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'colcon_buildx/**'
+      - 'docs/**'
+      - 'tools/**'
+      - 'README.md'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: generated pages and links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # The runner's own Python is enough: gen_docs.py formats the pages
+      # itself rather than relying on argparse's version-dependent output.
+      # A venv, because the system Python refuses pip installs (PEP 668).
+      - name: Install the package
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet .
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check the generated reference pages are current
+        run: python tools/gen_docs.py --check
+
+      - name: Check relative links in README.md and docs/
+        run: python tools/check_links.py
