@@ -65,7 +65,19 @@ def load_config(config_path=None):
     config_file = find_config_file(config_path)
     if not config_file:
         return None
+    return read_config_file(config_file)
 
+
+def read_config_file(config_file):
+    """
+    Read one configuration file, choosing the format by its suffix.
+
+    Args:
+        config_file: Path to the file
+
+    Returns:
+        dict: Configuration dictionary, or None if the file could not be read
+    """
     try:
         if config_file.suffix in ['.yml', '.yaml']:
             return load_yaml_config(config_file)

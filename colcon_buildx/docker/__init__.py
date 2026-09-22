@@ -155,7 +155,9 @@ class DockerBuilder:
 
                 print(f"ℹ️  Using synced image: {newest_image}")
                 print(f"   Synced on: {formatted_date}")
-                logger.info("ℹ️  Run with --use-base-image to use original base image instead")
+                # Printed: a build silently using an older image than the one
+                # asked for is surprising, and this is the way out.
+                print("   Pass --use-base-image to build in the base image instead")
 
                 return newest_image
 

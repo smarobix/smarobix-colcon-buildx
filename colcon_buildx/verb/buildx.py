@@ -109,9 +109,9 @@ def _workspace_root():
 
     cwd = Path.cwd()
     logger.warning(
-        f"⚠ No workspace root found: neither {cwd} nor the directories above it "
-        f"(up to {MAX_LEVELS} levels) contain a src/ directory. Using {cwd} as the "
-        "workspace root; run colcon buildx from your workspace root instead.")
+        f"⚠ No workspace root found: no src/ directory in {cwd} or the "
+        f"{MAX_LEVELS - 1} directories above it. Using the current directory as "
+        "the workspace root; run colcon buildx from your workspace root instead.")
     return cwd
 
 
@@ -300,14 +300,19 @@ class BuildxVerb(VerbExtensionPoint):
 
     def main(self, *, context):
         """Execute the cross-compilation build."""
-        from colcon_buildx.config import load_config, merge_settings
+        from colcon_buildx.config import find_config_file, merge_settings, read_config_file
 
         args = context.args
 
         # Precedence: command line > config file > DEFAULTS.
-        config = load_config(args.config)
-        if config:
-            logger.info("📝 Loaded configuration from file")
+        config = None
+        config_file = find_config_file(args.config)
+        if config_file:
+            config = read_config_file(config_file)
+        if config is not None:
+            # Printed, like the image in use: with settings coming from three
+            # places, which file was read is the first thing to check.
+            print(f"ℹ️  Config file: {config_file}")
         unknown = merge_settings(args, config, DEFAULTS, CONFIG_KEYS)
         for key in unknown:
             logger.warning(f"⚠ Ignoring unrecognised config key: {key}")
@@ -315,7 +320,7 @@ class BuildxVerb(VerbExtensionPoint):
         # choices= no longer covers a value arriving from the config file.
         if args.method not in METHODS:
             logger.error(f"❌ Unknown method: {args.method}")
-            logger.info(f"💡 Valid methods: {', '.join(METHODS)}")
+            logger.error(f"💡 Valid methods: {', '.join(METHODS)}")
             return 1
 
         logger.info(f"🔧 Cross-compilation method: {args.method}")
@@ -339,7 +344,9 @@ class BuildxVerb(VerbExtensionPoint):
                     return 1
 
                 logger.info("✅ Dependencies installed on device")
-                logger.info("ℹ Next step: run --sync-from-device to update Docker image")
+                if args.method == 'docker':
+                    print("ℹ️  Next, match the build image to the board: "
+                          f"colcon buildx --sync-from-device {args.install_deps_on_device}")
 
                 # This is a standalone operation, exit after completion
                 return 0
@@ -375,8 +382,13 @@ class BuildxVerb(VerbExtensionPoint):
                 # Yocto / OpenEmbedded SDK installed on this host
                 if not args.sdk_env:
                     logger.error("❌ --sdk-env is required for sdk method")
-                    logger.info("💡 Example: --sdk-env /opt/ros-sdk/environment-setup-cortexa72-cortexa53-oe-linux")
+                    logger.error("💡 Example: --sdk-env /opt/ros-sdk/environment-setup-cortexa72-cortexa53-oe-linux")
                     return 1
+
+                if args.install_deps:
+                    logger.warning(
+                        "⚠ Ignoring --install-deps: an SDK's sysroot is fixed when the SDK is "
+                        "built. Add the dependencies to the Yocto image and rebuild the SDK.")
 
                 from colcon_buildx.sdk import SdkBuilder
                 builder = SdkBuilder(
@@ -392,7 +404,7 @@ class BuildxVerb(VerbExtensionPoint):
                 # Docker-based cross-compilation
                 if not args.docker_image:
                     logger.error("❌ --docker-image is required for docker method")
-                    logger.info("💡 Example: --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy")
+                    logger.error("💡 Example: --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy")
                     return 1
 
                 from colcon_buildx.docker import DockerBuilder
@@ -415,18 +427,21 @@ class BuildxVerb(VerbExtensionPoint):
                         logger.error("❌ Failed to create synced image")
                         return 1
                     logger.info("✅ Package sync complete")
-                    logger.info("ℹ Next step: run 'colcon buildx' to build with synced image")
+                    print("ℹ️  Next, build: colcon buildx picks up the synced image by itself")
                     # This is a standalone operation, exit after completion
                     return 0
 
                 # Install dependencies if requested (with warning for Docker method)
                 if args.install_deps:
-                    logger.warning("⚠ Warning: --install-deps only installs dependencies in the Docker image.")
-                    logger.warning("  The target device will NOT have these dependencies installed.")
-                    logger.info("ℹ Recommended workflow:")
-                    logger.info("  1. colcon buildx --install-deps-on-device <device>")
-                    logger.info("  2. colcon buildx --sync-from-device <device>")
-                    logger.info("  3. colcon buildx")
+                    # One warning, so that the advice stays together with it.
+                    logger.warning(
+                        "⚠ --install-deps installs dependencies into a local copy of the "
+                        "Docker image only; the board will NOT have them.\n"
+                        "  To install them on the board and build against the same versions, "
+                        "with SSH_TARGET such as ubuntu@10.42.0.3:\n"
+                        "    1. colcon buildx --install-deps-on-device SSH_TARGET\n"
+                        "    2. colcon buildx --sync-from-device SSH_TARGET\n"
+                        "    3. colcon buildx")
                     logger.info("📦 Installing workspace dependencies in Docker image...")
                     updated_image = builder.install_dependencies(args.rosdep_args)
                     if not updated_image:
@@ -448,7 +463,7 @@ class BuildxVerb(VerbExtensionPoint):
             if args.deploy:
                 if not args.deploy_target:
                     logger.error("❌ --deploy-target is required when --deploy is used")
-                    logger.info("💡 Example: --deploy-target ubuntu@10.42.0.3:~/ros2_ws/install/")
+                    logger.error("💡 Example: --deploy-target ubuntu@10.42.0.3:~/ros2_ws/install/")
                     return 1
 
                 from colcon_buildx.deployment import deploy
