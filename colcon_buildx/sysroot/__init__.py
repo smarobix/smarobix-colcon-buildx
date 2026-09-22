@@ -9,6 +9,9 @@ from pathlib import Path
 
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx import ROS_DISTROS
+from colcon_buildx.workspace import resolve_workspace_root
+
 logger = colcon_logger.getChild(__name__)
 
 
@@ -16,17 +19,18 @@ class SysrootBuilder:
     """Handles cross-compilation using SSHFS-mounted sysroot."""
 
     def __init__(self, sysroot_host, sysroot_mount, toolchain_file,
-                 build_base, install_base, no_mount=False):
+                 build_base, install_base, no_mount=False, workspace_root=None):
         """
         Initialize sysroot builder.
 
         Args:
-            sysroot_host: Hostname/IP of target board (e.g., kria-vision-home)
+            sysroot_host: Hostname/IP of target board (e.g., my-board)
             sysroot_mount: Local mount point for sysroot
             toolchain_file: Path to CMake toolchain file
             build_base: Build directory
             install_base: Install directory
             no_mount: Skip mounting (sysroot already mounted)
+            workspace_root: Workspace root; found from the current directory by default
         """
         self.sysroot_host = sysroot_host
         self.sysroot_mount = Path(sysroot_mount).expanduser()
@@ -35,19 +39,7 @@ class SysrootBuilder:
         self.install_base = install_base
         self.no_mount = no_mount
         self._mounted_by_us = False
-        self.workspace_root = self._find_workspace_root()
-
-    def _find_workspace_root(self):
-        """Find the workspace root by looking for src/ directory."""
-        current = Path.cwd()
-        for _ in range(5):
-            if (current / 'src').is_dir():
-                return current
-            parent = current.parent
-            if parent == current:
-                break
-            current = parent
-        return Path.cwd()
+        self.workspace_root = resolve_workspace_root(workspace_root)
 
     def is_mounted(self):
         """Check if sysroot is currently mounted."""
@@ -82,7 +74,7 @@ class SysrootBuilder:
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
             logger.info(f"✓ Sysroot mounted at {self.sysroot_mount}")
             self._mounted_by_us = True
             return True
@@ -120,7 +112,7 @@ class SysrootBuilder:
                 logger.info("✓ Sysroot unmounted")
                 return True
             except subprocess.CalledProcessError:
-                logger.warning(f"⚠️  Failed to unmount sysroot")
+                logger.warning("⚠️  Failed to unmount sysroot")
                 return False
 
     def install_dependencies(self, rosdep_args='--ignore-src -y'):
@@ -155,8 +147,7 @@ class SysrootBuilder:
         env['SYSROOT_PATH'] = str(self.sysroot_mount)
 
         # ROS setup - try to detect ROS distro
-        ros_distros = ['jazzy', 'humble', 'iron', 'rolling']
-        for distro in ros_distros:
+        for distro in ROS_DISTROS:
             ros_path = self.sysroot_mount / 'opt' / 'ros' / distro
             if ros_path.exists():
                 env['CMAKE_PREFIX_PATH'] = f'{ros_path}:{self.sysroot_mount}/usr/lib/aarch64-linux-gnu/cmake'
@@ -170,7 +161,9 @@ class SysrootBuilder:
             if python_path.exists():
                 env['PYTHON_EXECUTABLE'] = str(python_path)
                 env['PYTHON_INCLUDE_DIR'] = str(self.sysroot_mount / 'usr' / 'include' / f'python{py_ver}')
-                env['PYTHON_LIBRARY'] = str(self.sysroot_mount / 'usr' / 'lib' / 'aarch64-linux-gnu' / f'libpython{py_ver}.so')
+                env['PYTHON_LIBRARY'] = str(
+                    self.sysroot_mount / 'usr' / 'lib' / 'aarch64-linux-gnu' /
+                    f'libpython{py_ver}.so')
                 logger.info(f"✓ Using Python {py_ver} from sysroot")
                 break
 
@@ -216,9 +209,11 @@ class SysrootBuilder:
 
             logger.info(f"🔨 Building with: colcon build {' '.join(extra_args)}")
 
-            # Set up environment and run
+            # Set up environment and run. colcon runs from the workspace root,
+            # like the other methods, so that it finds every package and the
+            # relative build and install bases land where --deploy looks.
             env = self.setup_environment()
-            result = subprocess.run(cmd, env=env)
+            result = subprocess.run(cmd, env=env, cwd=self.workspace_root)
 
             return result.returncode
 

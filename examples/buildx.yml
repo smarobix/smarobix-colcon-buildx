@@ -1,0 +1,82 @@
+# colcon-buildx configuration, YAML format.
+#
+# Copy this file to your workspace root, the directory that holds src/, as
+# .buildx.yml (.buildx.yaml works too). The same settings in key = value
+# format are in buildx.conf next to this file.
+#
+# Precedence: command line > this file > built-in defaults.
+# Each key is a long option name with underscores for hyphens: docker_image
+# is --docker-image. "colcon buildx --help" describes every option.
+# The keys that are set are the ones a docker build needs. The others are
+# commented out and show the default, or an example value where there is none.
+
+# --- Build method -------------------------------------------------------------
+
+# How to build: docker, sdk or sysroot.
+method: docker
+
+# Build directory, relative to the workspace root.
+# build_base: cross_build
+
+# Install directory, relative to the workspace root; deploy copies this.
+# install_base: cross_install
+
+# CMake toolchain file: required for sysroot, replaces the SDK's own for sdk.
+# toolchain: toolchain.cmake
+
+# --- Docker method (method: docker) -------------------------------------------
+
+# Image to build in: the tag for your board, OS and ROS distro.
+docker_image: ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy
+
+# Docker platform of the target: linux/arm/v7 for armhf boards.
+docker_platform: linux/arm64
+
+# Build with docker_image itself even if a local -synced- copy of it exists.
+# use_base_image: false
+
+# --- SDK method (method: sdk) -------------------------------------------------
+
+# Alternative: build against a Yocto/OE SDK installed on this Linux host.
+# method: sdk
+
+# SDK environment script(s) to source, colon-separated.
+# sdk_env: /opt/ros-sdk/environment-setup-cortexa72-cortexa53-oe-linux
+
+# Also write a colcon mixin with the SDK settings to .buildx/mixin/.
+# emit_mixin: false
+
+# --- SSHFS sysroot method (method: sysroot, experimental) ---------------------
+
+# Alternative: build against the board's root filesystem, mounted over SSHFS.
+# method: sysroot
+
+# Board to mount over SSHFS, as host or user@host.
+# sysroot_host: my-board
+
+# Local mount point for the board's root filesystem.
+# sysroot_mount: ~/mnt/board-sysroot
+
+# Use a sysroot already mounted at sysroot_mount instead of mounting it.
+# no_mount: false
+
+# --- Dependencies -------------------------------------------------------------
+
+# Run rosdep install first: in a local image (docker) or on the board (sysroot).
+# install_deps: false
+
+# Arguments for rosdep install.
+# rosdep_args: "--ignore-src -y"
+
+# Matching the image to a board and installing dependencies on it are one-off
+# actions, not settings, so they are command-line flags only:
+#   colcon buildx --install-deps-on-device ubuntu@10.42.0.3
+#   colcon buildx --sync-from-device ubuntu@10.42.0.3
+
+# --- Deployment ---------------------------------------------------------------
+
+# Copy the install directory to deploy_target after a successful build.
+# deploy: false
+
+# Where deploy copies to. rsync --delete removes files there that the build lacks.
+# deploy_target: ubuntu@10.42.0.3:~/ros2_ws/install/

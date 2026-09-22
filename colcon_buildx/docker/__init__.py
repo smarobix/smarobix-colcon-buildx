@@ -8,10 +8,12 @@ import os
 import shlex
 import subprocess
 import re
-from pathlib import Path
 from datetime import datetime
 
 from colcon_core.logging import colcon_logger
+
+from colcon_buildx import DEFAULT_ROS_DISTRO, ROS_DISTROS
+from colcon_buildx.workspace import resolve_workspace_root
 
 logger = colcon_logger.getChild(__name__)
 
@@ -49,7 +51,8 @@ def _user_args():
 class DockerBuilder:
     """Handles cross-compilation using Docker containers."""
 
-    def __init__(self, image, platform, build_base, install_base, use_base_image=False):
+    def __init__(self, image, platform, build_base, install_base, use_base_image=False,
+                 toolchain=None, workspace_root=None):
         """
         Initialize Docker builder.
 
@@ -59,13 +62,16 @@ class DockerBuilder:
             build_base: Build directory
             install_base: Install directory
             use_base_image: Force use of base image, skip synced image detection
+            toolchain: For a cross SDK image, a CMake toolchain file (as seen
+                inside the container) to use instead of the SDK's own
+            workspace_root: Workspace root; found from the current directory by default
         """
         self.base_image = image
         self.platform = platform
         self.build_base = build_base
         self.install_base = install_base
-        self.workspace_root = self._find_workspace_root()
-        self.container_name = 'colcon-buildx-builder'
+        self.toolchain = toolchain
+        self.workspace_root = resolve_workspace_root(workspace_root)
         self.use_base_image = use_base_image
 
         # Populated from image labels once the image is available locally.
@@ -78,18 +84,6 @@ class DockerBuilder:
             self.image = self.detect_synced_image()
         else:
             self.image = self.base_image
-
-    def _find_workspace_root(self):
-        """Find the workspace root by looking for src/ directory."""
-        current = Path.cwd()
-        for _ in range(5):
-            if (current / 'src').is_dir():
-                return current
-            parent = current.parent
-            if parent == current:
-                break
-            current = parent
-        return Path.cwd()
 
     def detect_synced_image(self):
         """
@@ -138,9 +132,14 @@ class DockerBuilder:
                     regex_pattern = f"{re.escape(base_tag_clean)}-synced-\\d{{8}}$"
                     is_match = re.match(regex_pattern, tag)
 
-                    logger.debug(f"   Checking: {line} → repo={repo}, tag={tag}, pattern={regex_pattern}, match={bool(is_match)}")
+                    logger.debug(
+                        f"   Checking: {line} → repo={repo}, tag={tag}, "
+                        f"pattern={regex_pattern}, match={bool(is_match)}")
 
-                    if is_match:
+                    # generate_synced_tag keeps the repository, so a synced
+                    # copy of this image lives in the same one. The same tag in
+                    # another repository, a mirror say, is a different image.
+                    if is_match and repo == registry_and_repo:
                         synced_images.append((tag, line))
 
             if synced_images:
@@ -161,7 +160,9 @@ class DockerBuilder:
 
                 print(f"ℹ️  Using synced image: {newest_image}")
                 print(f"   Synced on: {formatted_date}")
-                logger.info("ℹ️  Run with --use-base-image to use original base image instead")
+                # Printed: a build silently using an older image than the one
+                # asked for is surprising, and this is the way out.
+                print("   Pass --use-base-image to build in the base image instead")
 
                 return newest_image
 
@@ -178,12 +179,21 @@ class DockerBuilder:
         Create a synced version of the base image from target device.
 
         Args:
-            ssh_target: SSH connection string (e.g., 'ubuntu@192.168.1.100')
+            ssh_target: SSH connection string (e.g., 'ubuntu@10.42.0.3')
 
         Returns:
             New synced image tag, or None if sync failed
         """
         from colcon_buildx.package_sync import sync_packages_from_device
+
+        if self._is_cross_sdk(self.base_image):
+            logger.error(
+                f"❌ {self.base_image} is a cross SDK image: it runs on the host, so its "
+                "Debian packages are not the target's and cannot be synced to a board.")
+            logger.error(
+                "💡 The target's libraries come from the SDK's sysroot, which is fixed "
+                "when the SDK is built.")
+            return None
 
         manifest_path = self.workspace_root / '.buildx-sync-manifest.json'
 
@@ -191,7 +201,8 @@ class DockerBuilder:
             synced_tag = sync_packages_from_device(
                 self.base_image,
                 ssh_target,
-                manifest_path
+                manifest_path,
+                platform=self.platform
             )
             return synced_tag
         except Exception as e:
@@ -209,6 +220,12 @@ class DockerBuilder:
             New synced image tag with dependencies installed, or None if failed
         """
         from colcon_buildx.rosdep_manager import install_deps_docker
+
+        if self._is_cross_sdk(self.image):
+            logger.warning(
+                f"⚠ Ignoring --install-deps: {self.image} is a cross SDK image. Its "
+                "sysroot is fixed when the SDK is built; rosdep cannot add to it.")
+            return self.image
 
         try:
             # Use current image (could be base or already synced)
@@ -237,13 +254,17 @@ class DockerBuilder:
             logger.error("💡 Install Docker: https://docs.docker.com/get-docker/")
             return False
 
-    def _inspect(self):
-        """Return the `docker image inspect` object for the image, or None."""
-        result = subprocess.run(
-            ['docker', 'image', 'inspect', self.image],
-            capture_output=True,
-            text=True
-        )
+    def _inspect(self, image=None):
+        """Return the `docker image inspect` object for *image*, or None."""
+        try:
+            result = subprocess.run(
+                ['docker', 'image', 'inspect', image or self.image],
+                capture_output=True,
+                text=True
+            )
+        except FileNotFoundError:
+            logger.debug("   docker not found")
+            return None
         if result.returncode != 0:
             logger.debug(f"   docker inspect return code: {result.returncode}")
             logger.debug(f"   stderr: {result.stderr}")
@@ -254,6 +275,16 @@ class DockerBuilder:
             logger.debug(f"   could not parse inspect output: {e}")
             return None
         return parsed[0] if parsed else None
+
+    def _is_cross_sdk(self, image):
+        """
+        Return True if *image* is a local cross SDK image.
+
+        An image that is not local yet cannot be told apart, and is taken not to
+        be one; the operation that needs it pulls it and goes ahead.
+        """
+        labels = ((self._inspect(image) or {}).get('Config') or {}).get('Labels') or {}
+        return labels.get(LABEL_KIND) == KIND_OE_SDK
 
     def _apply_labels(self, inspected):
         """Read buildx labels off an inspected image and configure from them."""
@@ -313,18 +344,24 @@ class DockerBuilder:
             return labelled
 
         image_lower = self.image.lower()
-        for distro in ('jazzy', 'humble', 'iron', 'rolling'):
+        for distro in ROS_DISTROS:
             if distro in image_lower:
                 return distro
         logger.warning(
-            f"⚠️  Could not determine ROS distro from '{self.image}', assuming jazzy. "
-            f"Set the {LABEL_ROS_DISTRO} label on the image to be explicit.")
-        return 'jazzy'
+            f"⚠️  Could not determine ROS distro from '{self.image}', assuming "
+            f"{DEFAULT_ROS_DISTRO}. Set the {LABEL_ROS_DISTRO} label on the image "
+            "to be explicit.")
+        return DEFAULT_ROS_DISTRO
 
     def _native_command(self, build_dir, install_dir, extra_args):
         """docker run for an image that runs as the target architecture."""
         ros_distro = self.detect_ros_distro()
         logger.info(f"✓ Using ROS {ros_distro}")
+
+        if self.toolchain:
+            logger.warning(
+                f"⚠ Ignoring --toolchain: {self.image} runs as the target and builds "
+                "natively. Only a cross SDK image uses a toolchain file.")
 
         script = (
             f'source /opt/ros/{ros_distro}/setup.bash && '
@@ -351,16 +388,31 @@ class DockerBuilder:
 
     def _oe_sdk_command(self, build_dir, install_dir, extra_args):
         """docker run for a cross SDK image, which runs on the host architecture."""
-        from colcon_buildx.toolchain import WRAPPER_NAME, write_wrapper
+        from colcon_buildx.toolchain import ENV_TOOLCHAIN, WRAPPER_NAME, write_wrapper
 
         sources = ' && '.join(f'. {shlex.quote(p)}' for p in self.env_setup)
 
         # The wrapper refers to $ENV{OE_CMAKE_TOOLCHAIN_FILE} rather than a path,
         # so it can be written here on the host into the bind-mounted build base
         # even though that variable only exists once the SDK is sourced in the
-        # container.
-        write_wrapper(build_dir / WRAPPER_NAME, SDK_INSTALL_DIR)
+        # container. --toolchain replaces it with a path inside the container.
+        write_wrapper(build_dir / WRAPPER_NAME, SDK_INSTALL_DIR, self.toolchain or ENV_TOOLCHAIN)
         wrapper = f'{SDK_BUILD_DIR}/{WRAPPER_NAME}'
+
+        # Without ros-sdk-env there is no toolchain file to wrap, unless the
+        # user named one.
+        if self.toolchain:
+            toolchain_check = ''
+        else:
+            toolchain_check = (
+                'if [ -z "$OE_CMAKE_TOOLCHAIN_FILE" ]; then '
+                '  echo "OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment:'
+                ' the SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in'
+                ' meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK'
+                ' when building the SDK" >&2; '
+                '  exit 1; '
+                'fi && '
+            )
 
         # CMAKE_TOOLCHAIN_FILE is passed through the environment rather than as
         # --cmake-args: colcon's --cmake-args would collide with a user-supplied
@@ -369,13 +421,7 @@ class DockerBuilder:
             'set -e && '
             f'{sources} && '
             f'export ROS_WORKSPACE={SDK_WORKSPACE} && '
-            'if [ -z "$OE_CMAKE_TOOLCHAIN_FILE" ]; then '
-            '  echo "OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment:'
-            ' the SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in'
-            ' meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK'
-            ' when building the SDK" >&2; '
-            '  exit 1; '
-            'fi && '
+            f'{toolchain_check}'
             f'export CMAKE_TOOLCHAIN_FILE={wrapper} && '
             # Meta-ros SDKs ship ninja but not make. Use Ninja when the sourced
             # environment has it and the user has not chosen a generator; an SDK

@@ -3,13 +3,18 @@
 
 """Configuration file handling for buildx."""
 
-import os
 from pathlib import Path
 import yaml
 
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx.workspace import search_path
+
 logger = colcon_logger.getChild(__name__)
+
+# Looked for in this order in each directory; the first one found is used and
+# the others are ignored.
+CONFIG_NAMES = ('.buildx.conf', '.buildx.yml', '.buildx.yaml')
 
 
 def find_config_file(config_path=None):
@@ -18,9 +23,9 @@ def find_config_file(config_path=None):
 
     Searches in order:
     1. Provided path (--config argument)
-    2. .buildx.conf in current directory
-    3. .buildx.yml / .buildx.yaml in current directory
-    4. Same files in parent directories (up to workspace root with src/)
+    2. .buildx.conf, .buildx.yml, .buildx.yaml in the current directory
+    3. The same names in each parent directory, stopping at the workspace
+       root (the first directory with src/) or after MAX_LEVELS directories
 
     Args:
         config_path: Optional explicit path to config file
@@ -35,25 +40,12 @@ def find_config_file(config_path=None):
         logger.warning(f"Specified config file not found: {config_path}")
         return None
 
-    # Search for config file in current directory and parents
-    current = Path.cwd()
-    config_names = ['.buildx.conf', '.buildx.yml', '.buildx.yaml']
-
-    for _ in range(5):  # Search up to 5 levels
-        for name in config_names:
-            config_file = current / name
+    for directory in search_path():
+        for name in CONFIG_NAMES:
+            config_file = directory / name
             if config_file.exists():
                 logger.debug(f"Found configuration file: {config_file}")
                 return config_file
-
-        # Check if we're at workspace root (has src/ directory)
-        if (current / 'src').is_dir():
-            break
-
-        parent = current.parent
-        if parent == current:  # Reached filesystem root
-            break
-        current = parent
 
     return None
 
@@ -73,7 +65,19 @@ def load_config(config_path=None):
     config_file = find_config_file(config_path)
     if not config_file:
         return None
+    return read_config_file(config_file)
 
+
+def read_config_file(config_file):
+    """
+    Read one configuration file, choosing the format by its suffix.
+
+    Args:
+        config_file: Path to the file
+
+    Returns:
+        dict: Configuration dictionary, or None if the file could not be read
+    """
     try:
         if config_file.suffix in ['.yml', '.yaml']:
             return load_yaml_config(config_file)
@@ -84,11 +88,25 @@ def load_config(config_path=None):
         return None
 
 
+def normalize_key(key):
+    """
+    Spell a config key the way CONFIG_KEYS does.
+
+    Both formats accept the flag's own spelling, so docker-image and
+    docker_image are the same key.
+    """
+    return str(key).strip().replace('-', '_')
+
+
 def load_yaml_config(config_file):
     """Load YAML configuration file."""
     with open(config_file, 'r') as f:
         config = yaml.safe_load(f)
-    return config or {}
+    if config is None:
+        return {}
+    if not isinstance(config, dict):
+        raise ValueError('expected "key: value" pairs at the top level')
+    return {normalize_key(key): value for key, value in config.items()}
 
 
 def load_conf_config(config_file):
@@ -100,7 +118,7 @@ def load_conf_config(config_file):
         key = value
         another_key = another value
 
-    Keys with hyphens are converted to underscores (--docker-image → docker_image)
+    Keys with hyphens are converted to underscores (docker-image → docker_image)
     """
     config = {}
     with open(config_file, 'r') as f:
@@ -112,7 +130,7 @@ def load_conf_config(config_file):
 
             if '=' in line:
                 key, value = line.split('=', 1)
-                key = key.strip().replace('-', '_')  # Convert --arg-name to arg_name
+                key = normalize_key(key)
                 value = value.strip()
 
                 # Remove quotes if present

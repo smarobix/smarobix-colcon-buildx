@@ -11,8 +11,10 @@ using rosdep in both Docker and SSHFS cross-compilation methods.
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Set, List
+from typing import Set
 from datetime import datetime
+
+from colcon_buildx import DEFAULT_ROS_DISTRO
 
 
 def parse_workspace_deps(workspace_path: Path) -> Set[str]:
@@ -44,7 +46,7 @@ def parse_workspace_deps(workspace_path: Path) -> Set[str]:
 
             # Extract dependencies from various tags
             for dep_type in ['depend', 'build_depend', 'exec_depend',
-                           'build_export_depend', 'buildtool_depend']:
+                             'build_export_depend', 'buildtool_depend']:
                 for dep in root.findall(dep_type):
                     if dep.text:
                         dependencies.add(dep.text.strip())
@@ -81,7 +83,7 @@ def install_deps_docker(
     from colcon_buildx.package_sync import generate_synced_tag, commit_synced_image, save_sync_manifest
 
     print(f"\n{'='*60}")
-    print(f"Installing ROS dependencies in Docker image...")
+    print("Installing ROS dependencies in Docker image...")
     print(f"{'='*60}\n")
 
     # Parse dependencies
@@ -103,6 +105,11 @@ if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
 fi
 rosdep update
 
+# The images delete their apt lists to stay small, and rosdep installs with
+# apt-get install, which cannot find anything without them.
+echo "Updating package lists..."
+apt-get update -qq
+
 echo "Installing workspace dependencies..."
 cd /workspace
 rosdep install --from-paths src {rosdep_args}
@@ -114,51 +121,45 @@ rm -rf /var/lib/apt/lists/*
 echo "Dependencies installed successfully!"
 """
 
-    print("🔄 Creating temporary container to install dependencies...")
-
-    # Create container with workspace mounted
-    create_cmd = [
-        'docker', 'create',
-        '--platform', platform,
+    # The script runs once, as the container's own command, in a container
+    # kept after it exits so it can be committed. It used to be the command of
+    # a container that was then started *and* run again with docker exec, so
+    # two copies raced for the apt lock, or the exec found the container
+    # already stopped.
+    container_name = f"buildx-rosdep-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    run_cmd = [
+        'docker', 'run',
+        '--name', container_name,
+        *(['--platform', platform] if platform else []),
         '-v', f'{workspace_path}:/workspace:ro',
         image,
         'bash', '-c', install_script
     ]
 
     try:
-        result = subprocess.run(create_cmd, capture_output=True, text=True, check=True)
-        container_id = result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to create container: {e.stderr}")
-
-    try:
-        # Start container
-        subprocess.run(['docker', 'start', container_id], check=True, capture_output=True)
-
-        # Run installation
-        print("📦 Running rosdep install...")
-        exec_result = subprocess.run(
-            ['docker', 'exec', container_id, 'bash', '-c', install_script],
+        print("📦 Running rosdep install in a temporary container...")
+        run_result = subprocess.run(
+            run_cmd,
             capture_output=True,
             text=True,
             timeout=600  # 10 minutes timeout
         )
 
-        if exec_result.returncode != 0:
-            print(f"❌ Dependency installation failed:")
-            print(exec_result.stderr)
+        if run_result.returncode != 0:
+            print("❌ Dependency installation failed:")
+            print(run_result.stderr)
             raise RuntimeError("rosdep install failed")
 
         # Show relevant output
-        for line in exec_result.stdout.split('\n'):
+        for line in run_result.stdout.split('\n'):
             if 'Installing' in line or 'installed' in line or 'already installed' in line:
                 print(f"  {line}")
 
-        print(f"✓ Successfully installed workspace dependencies")
+        print("✓ Successfully installed workspace dependencies")
 
         # Commit container to new synced image
         new_tag = generate_synced_tag(image)
-        commit_synced_image(container_id, new_tag)
+        commit_synced_image(container_name, new_tag)
 
         # Update manifest
         manifest_path = workspace_path / '.buildx-sync-manifest.json'
@@ -176,7 +177,7 @@ echo "Dependencies installed successfully!"
         save_sync_manifest(metadata, manifest_path)
 
         print(f"\n{'='*60}")
-        print(f"✓ Dependencies installed!")
+        print("✓ Dependencies installed!")
         print(f"✓ Created synced image: {new_tag}")
         print(f"{'='*60}\n")
 
@@ -186,8 +187,8 @@ echo "Dependencies installed successfully!"
         raise RuntimeError("rosdep install timed out after 10 minutes")
     finally:
         # Clean up container
-        subprocess.run(['docker', 'rm', '-f', container_id],
-                      capture_output=True, check=False)
+        subprocess.run(['docker', 'rm', '-f', container_name],
+                       capture_output=True, check=False)
 
 
 def install_deps_sshfs(
@@ -199,7 +200,7 @@ def install_deps_sshfs(
     Install ROS dependencies on remote device via SSH using rosdep.
 
     Args:
-        ssh_target: SSH connection string (e.g., 'ubuntu@192.168.1.100')
+        ssh_target: SSH connection string (e.g., 'ubuntu@10.42.0.3')
         workspace_path: Local path to workspace root
         rosdep_args: Additional arguments for rosdep install
 
@@ -218,7 +219,7 @@ def install_deps_sshfs(
 
     # We need to copy the src directory to the device temporarily
     # to let rosdep analyze the dependencies
-    print(f"📤 Copying workspace src to device for analysis...")
+    print("📤 Copying workspace src to device for analysis...")
 
     # Create remote temp directory
     temp_dir_cmd = ['ssh', ssh_target, 'mktemp -d']
@@ -245,10 +246,10 @@ def install_deps_sshfs(
             print(f"❌ Failed to sync workspace to device: {rsync_result.stderr}")
             return False
 
-        print(f"✓ Workspace synced to device")
+        print("✓ Workspace synced to device")
 
         # Run rosdep install on device
-        print(f"📦 Running rosdep install on device...")
+        print("📦 Running rosdep install on device...")
 
         # Detect ROS distro on device first
         detect_distro_cmd = "ls /opt/ros/ 2>/dev/null | head -1"
@@ -256,7 +257,7 @@ def install_deps_sshfs(
             ['ssh', ssh_target, detect_distro_cmd],
             capture_output=True, text=True, timeout=10
         )
-        ros_distro = distro_result.stdout.strip() or 'jazzy'
+        ros_distro = distro_result.stdout.strip() or DEFAULT_ROS_DISTRO
         print(f"  Detected ROS distro on device: {ros_distro}")
 
         # Build the rosdep command as a single string for SSH
@@ -281,17 +282,17 @@ def install_deps_sshfs(
         )
 
         if install_result.returncode != 0:
-            print(f"❌ rosdep install failed on device")
+            print("❌ rosdep install failed on device")
             return False
 
         print(f"\n{'='*60}")
-        print(f"✓ Successfully installed dependencies on device")
+        print("✓ Successfully installed dependencies on device")
         print(f"{'='*60}\n")
 
         return True
 
     except subprocess.TimeoutExpired:
-        print(f"❌ Dependency installation timed out after 10 minutes")
+        print("❌ Dependency installation timed out after 10 minutes")
         return False
     except Exception as e:
         print(f"❌ Error during dependency installation: {e}")
@@ -300,25 +301,3 @@ def install_deps_sshfs(
         # Clean up remote temp directory
         cleanup_cmd = ['ssh', ssh_target, f'rm -rf {remote_temp}']
         subprocess.run(cleanup_cmd, capture_output=True, check=False, timeout=10)
-
-
-def check_rosdep_installed(ssh_target: str = None) -> bool:
-    """
-    Check if rosdep is installed (locally or on remote device).
-
-    Args:
-        ssh_target: Optional SSH target to check remote device. If None, checks locally.
-
-    Returns:
-        True if rosdep is available, False otherwise
-    """
-    if ssh_target:
-        check_cmd = ['ssh', ssh_target, 'which', 'rosdep']
-    else:
-        check_cmd = ['which', 'rosdep']
-
-    try:
-        result = subprocess.run(check_cmd, capture_output=True, timeout=5)
-        return result.returncode == 0
-    except:
-        return False

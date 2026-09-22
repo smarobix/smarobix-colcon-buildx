@@ -225,3 +225,65 @@ def test_sdk_builds_use_ninja_only_when_available_and_unchosen(workspace):
         workspace / 'cross_build', workspace / 'cross_install', [])[-1]
     assert ('if [ -z "${CMAKE_GENERATOR:-}" ] && command -v ninja >/dev/null; then '
             'export CMAKE_GENERATOR=Ninja; fi') in script
+
+
+# --- --toolchain with the docker backend --------------------------------------
+
+def test_toolchain_replaces_the_sdk_toolchain_in_a_cross_sdk_image(workspace):
+    builder = docker.DockerBuilder(
+        'img:jazzy', 'linux/arm64', 'cross_build', 'cross_install',
+        use_base_image=True, toolchain='/opt/sdk/my-toolchain.cmake')
+    builder._apply_labels(OE_SDK_IMAGE)
+    build = workspace / 'cross_build'
+    build.mkdir()
+
+    script = builder._oe_sdk_command(build, workspace / 'cross_install', [])[-1]
+
+    assert (build / WRAPPER_NAME).read_text() == wrapper_text(
+        '/workspace/cross_install', '/opt/sdk/my-toolchain.cmake')
+    # The SDK need not export a toolchain file when the user named one.
+    assert 'OE_CMAKE_TOOLCHAIN_FILE' not in script
+    assert f'export CMAKE_TOOLCHAIN_FILE=/workspace/cross_build/{WRAPPER_NAME}' in script
+
+
+def test_toolchain_is_ignored_with_a_warning_by_a_native_image(workspace, caplog):
+    builder = docker.DockerBuilder(
+        'img:jazzy', 'linux/arm64', 'cross_build', 'cross_install',
+        use_base_image=True, toolchain='/opt/sdk/my-toolchain.cmake')
+    with caplog.at_level('WARNING'):
+        cmd = builder._native_command(workspace / 'b', workspace / 'i', [])
+    assert 'my-toolchain' not in ' '.join(cmd)
+    assert 'Ignoring --toolchain' in caplog.text
+
+
+# --- synced images and cross SDK images ---------------------------------------
+
+def test_synced_image_must_come_from_the_same_repository(workspace, monkeypatch):
+    base = 'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy'
+    listing = 'docker.io/someone/mirror:k26-jazzy-synced-20260922\n'
+
+    def run(cmd, **kwargs):
+        return docker.subprocess.CompletedProcess(cmd, 0, stdout=listing)
+
+    monkeypatch.setattr(docker.subprocess, 'run', run)
+    builder = docker.DockerBuilder(base, 'linux/arm64', 'cross_build', 'cross_install')
+    assert builder.image == base
+
+
+def test_cross_sdk_image_cannot_be_synced_from_a_device(workspace, monkeypatch):
+    from colcon_buildx import package_sync
+
+    monkeypatch.setattr(docker.DockerBuilder, '_inspect', lambda self, image=None: OE_SDK_IMAGE)
+    monkeypatch.setattr(package_sync, 'sync_packages_from_device',
+                        lambda *a, **k: pytest.fail('synced a cross SDK image'))
+    assert _builder().create_synced_image('ubuntu@10.42.0.3') is None
+
+
+def test_install_deps_leaves_a_cross_sdk_image_alone(workspace, monkeypatch):
+    from colcon_buildx import rosdep_manager
+
+    monkeypatch.setattr(docker.DockerBuilder, '_inspect', lambda self, image=None: OE_SDK_IMAGE)
+    monkeypatch.setattr(rosdep_manager, 'install_deps_docker',
+                        lambda *a, **k: pytest.fail('ran rosdep in a cross SDK image'))
+    builder = _builder()
+    assert builder.install_dependencies() == builder.image

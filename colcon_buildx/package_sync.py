@@ -12,10 +12,20 @@ import subprocess
 import json
 import re
 import sys
-from collections import deque
 from datetime import datetime
 from typing import Dict, Tuple, Set
 from pathlib import Path
+
+
+def _platform_args(platform):
+    """
+    Return the docker run --platform option for *platform*.
+
+    The image has to run as the target, whatever its architecture: armhf
+    boards need linux/arm/v7, not the linux/arm64 this used to hard-code.
+    With no platform, Docker picks the variant itself.
+    """
+    return ['--platform', platform] if platform else []
 
 
 class PackageInfo:
@@ -35,7 +45,7 @@ def extract_device_packages(ssh_target: str) -> Dict[str, PackageInfo]:
     Extract installed packages from target device via SSH.
 
     Args:
-        ssh_target: SSH connection string (e.g., 'ubuntu@192.168.1.100')
+        ssh_target: SSH connection string (e.g., 'ubuntu@10.42.0.3')
 
     Returns:
         Dictionary mapping package names to PackageInfo objects
@@ -78,12 +88,13 @@ def extract_device_packages(ssh_target: str) -> Dict[str, PackageInfo]:
     return packages
 
 
-def extract_image_packages(image: str) -> Dict[str, PackageInfo]:
+def extract_image_packages(image: str, platform: str = None) -> Dict[str, PackageInfo]:
     """
     Extract installed packages from Docker image.
 
     Args:
         image: Docker image name/tag
+        platform: Docker platform to run the image as (e.g., linux/arm/v7)
 
     Returns:
         Dictionary mapping package names to PackageInfo objects
@@ -94,7 +105,7 @@ def extract_image_packages(image: str) -> Dict[str, PackageInfo]:
     print(f"📦 Extracting package list from image {image}...")
 
     cmd = [
-        'docker', 'run', '--rm', '--platform', 'linux/arm64',
+        'docker', 'run', '--rm', *_platform_args(platform),
         image,
         'dpkg-query', '-W', '-f=${Package}\t${Version}\t${Architecture}\n'
     ]
@@ -234,7 +245,8 @@ show_progress_bar() {
     local remaining_bar=$(printf '%*s' "$remaining_chars" '')
 
     # Simple output - no colors, just the bar
-    printf "PROGRESS_BAR:[%s%s] %d/%d (%d ok %d fail)\\n" "$processed_bar" "$remaining_bar" "$processed" "$total" "$installed" "$failed"
+    printf "PROGRESS_BAR:[%s%s] %d/%d (%d ok %d fail)\\n" \\
+        "$processed_bar" "$remaining_bar" "$processed" "$total" "$installed" "$failed"
 }
 
 echo "Updating package lists..."
@@ -332,7 +344,9 @@ if [ $AVAILABLE_COUNT -gt 0 ]; then
                 FAILED_PACKAGES="$FAILED_PACKAGES $pkg"
                 FAILED_COUNT=$((FAILED_COUNT + 1))
                 # Extract the error reason (last non-empty line or E: line)
-                ERROR_REASON=$(echo "$INSTALL_OUTPUT" | grep -E "^E:|Unable to|has no installation|dependency|held|unmet" | tail -1 | sed 's/^E: //')
+                ERROR_REASON=$(echo "$INSTALL_OUTPUT" \\
+                    | grep -E "^E:|Unable to|has no installation|dependency|held|unmet" \\
+                    | tail -1 | sed 's/^E: //')
                 if [ -z "$ERROR_REASON" ]; then
                     ERROR_REASON="Unknown error"
                 fi
@@ -399,7 +413,7 @@ def commit_synced_image(container_id: str, new_tag: str) -> None:
         subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120)
         print(f"✓ Created synced image: {new_tag}")
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"Docker commit timed out")
+        raise RuntimeError("Docker commit timed out")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to commit image: {e.stderr}")
 
@@ -438,10 +452,12 @@ def generate_synced_tag(base_image: str) -> str:
     Generate a synced image tag from base image name.
 
     Args:
-        base_image: Original image name (e.g., 'registry.com/ros:jazzy-base' or 'kv26:jazzy-base')
+        base_image: Original image name, e.g.
+            'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy'
 
     Returns:
-        New full image name with -synced-YYYYMMDD suffix (e.g., 'kv26:jazzy-base-synced-20251125')
+        New full image name with a -synced-YYYYMMDD suffix, e.g.
+        'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy-synced-20260922'
     """
     # Extract repository and tag portions
     if ':' in base_image:
@@ -467,7 +483,8 @@ def generate_synced_tag(base_image: str) -> str:
 def sync_packages_from_device(
     base_image: str,
     ssh_target: str,
-    manifest_path: Path
+    manifest_path: Path,
+    platform: str = None
 ) -> str:
     """
     Main function to sync packages from device to Docker image.
@@ -476,6 +493,7 @@ def sync_packages_from_device(
         base_image: Base Docker image to sync
         ssh_target: SSH target for device connection
         manifest_path: Path to save manifest
+        platform: Docker platform to run the image as (e.g., linux/arm/v7)
 
     Returns:
         New synced image tag
@@ -489,7 +507,7 @@ def sync_packages_from_device(
 
     # Extract package lists
     device_pkgs = extract_device_packages(ssh_target)
-    image_pkgs = extract_image_packages(base_image)
+    image_pkgs = extract_image_packages(base_image, platform)
 
     # Compare packages
     version_diffs, device_only, image_only = compare_packages(device_pkgs, image_pkgs)
@@ -511,7 +529,7 @@ def sync_packages_from_device(
               (f" ... and {more} more" if more > 0 else ""))
 
     if not version_diffs and not device_only:
-        print(f"\n✓ All packages are already in sync!")
+        print("\n✓ All packages are already in sync!")
         new_tag = generate_synced_tag(base_image)
         # Still create the tag to mark it as synced
         print(f"ℹ Creating synced image tag anyway: {new_tag}")
@@ -552,7 +570,7 @@ def sync_packages_from_device(
     sync_script = generate_sync_script(version_diffs, device_only_pkgs)
 
     # Run sync in a container and keep it running so we can commit
-    print(f"\n🔄 Creating container and syncing packages...")
+    print("\n🔄 Creating container and syncing packages...")
 
     # Use docker run with a name so we can commit it afterward
     # Run the sync script directly, container stays around after completion
@@ -567,7 +585,7 @@ def sync_packages_from_device(
             [
                 'docker', 'run',
                 '--name', container_name,
-                '--platform', 'linux/arm64',
+                *_platform_args(platform),
                 base_image,
                 'bash', '-c', sync_script
             ],
@@ -675,7 +693,7 @@ def sync_packages_from_device(
             raise
 
         if process.returncode != 0:
-            print(f"❌ Package sync failed. Last output:")
+            print("❌ Package sync failed. Last output:")
             for line in last_output[-10:]:
                 print(f"  {line}")
             raise RuntimeError("Package synchronization failed")
@@ -689,7 +707,8 @@ def sync_packages_from_device(
         if version_diffs:
             print(f"✓ Version-matched {len(version_diffs)} packages")
         if device_only:
-            print(f"✓ Device-only packages: {installed_count} installed, {failed_count} failed, {unavailable_count} unavailable")
+            print(f"✓ Device-only packages: {installed_count} installed, "
+                  f"{failed_count} failed, {unavailable_count} unavailable")
 
         # Save detailed log to cross_log directory
         log_dir = manifest_path.parent / 'cross_log'
@@ -697,13 +716,13 @@ def sync_packages_from_device(
         log_file = log_dir / f"sync-packages-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 
         with open(log_file, 'w') as f:
-            f.write(f"Package Sync Report\n")
+            f.write("Package Sync Report\n")
             f.write(f"{'='*60}\n")
             f.write(f"Date: {datetime.now().isoformat()}\n")
             f.write(f"Device: {ssh_target}\n")
             f.write(f"Base Image: {base_image}\n\n")
 
-            f.write(f"Summary:\n")
+            f.write("Summary:\n")
             f.write(f"  - Version-matched: {len(version_diffs)}\n")
             f.write(f"  - Device-only attempted: {len(device_only)}\n")
             f.write(f"  - Successfully installed: {installed_count}\n")
@@ -769,15 +788,15 @@ def sync_packages_from_device(
         save_sync_manifest(metadata, manifest_path)
 
         print(f"\n{'='*60}")
-        print(f"✓ Package sync complete!")
+        print("✓ Package sync complete!")
         print(f"✓ Created synced image: {new_tag}")
         print(f"{'='*60}\n")
 
         return new_tag
 
     except subprocess.TimeoutExpired:
-        raise RuntimeError("Package sync timed out after 30 minutes")
+        raise RuntimeError("Package sync timed out after 60 minutes")
     finally:
         # Clean up container
         subprocess.run(['docker', 'rm', '-f', container_name],
-                      capture_output=True, check=False)
+                       capture_output=True, check=False)

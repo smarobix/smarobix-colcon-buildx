@@ -14,13 +14,14 @@ hand-maintained SOABI strings and host libpython symlinks that cross-compiling
 against a vendor sysroot otherwise needs.
 """
 
-import os
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 from colcon_core.logging import colcon_logger
+
+from colcon_buildx.workspace import resolve_workspace_root
 
 logger = colcon_logger.getChild(__name__)
 
@@ -38,7 +39,7 @@ class SdkBuilder:
     """Handles cross-compilation using an OE/Yocto SDK installed on this host."""
 
     def __init__(self, env_setup, build_base, install_base,
-                 toolchain_file=None, emit_mixin=False):
+                 toolchain_file=None, emit_mixin=False, workspace_root=None):
         """
         Initialize SDK builder.
 
@@ -48,34 +49,24 @@ class SdkBuilder:
             install_base: Install directory
             toolchain_file: Override for the SDK's own CMake toolchain file
             emit_mixin: Also write a colcon mixin describing these settings
+            workspace_root: Workspace root; found from the current directory by default
         """
         self.env_setup = [p for p in str(env_setup).split(':') if p]
         self.build_base = build_base
         self.install_base = install_base
         self.toolchain_file = toolchain_file
         self.emit_mixin = emit_mixin
-        self.workspace_root = self._find_workspace_root()
-
-    def _find_workspace_root(self):
-        """Find the workspace root by looking for src/ directory."""
-        current = Path.cwd()
-        for _ in range(5):
-            if (current / 'src').is_dir():
-                return current
-            parent = current.parent
-            if parent == current:
-                break
-            current = parent
-        return Path.cwd()
+        self.workspace_root = resolve_workspace_root(workspace_root)
 
     def check_host(self):
         """Yocto SDK installers are Linux binaries; nothing else can run them."""
         if sys.platform.startswith('linux'):
             return True
         logger.error(f"❌ --method sdk requires a Linux host (this is {sys.platform})")
-        logger.error("💡 An OE/Yocto SDK is a Linux binary and cannot run here.")
-        logger.info("ℹ Use a cross SDK container instead, which runs on any host:")
-        logger.info("    colcon buildx --method docker --docker-image <oe-sdk image>")
+        logger.error("💡 An OE/Yocto SDK is a Linux binary and cannot run here. Use a "
+                     "cross SDK image instead, which runs wherever Docker does, e.g.:\n"
+                     "    colcon buildx --method docker --docker-image "
+                     "ghcr.io/smarobix/smarobix-buildx-images:k26-oesdk-jazzy")
         return False
 
     def check_env_setup(self):
@@ -84,7 +75,7 @@ class SdkBuilder:
         for path in missing:
             logger.error(f"❌ SDK environment script not found: {path}")
         if missing:
-            logger.info("💡 Point --sdk-env at the SDK's environment-setup-* script")
+            logger.error("💡 Point --sdk-env at the SDK's environment-setup-* script")
         return not missing
 
     def _source_prefix(self):
@@ -146,10 +137,12 @@ class SdkBuilder:
         (mixin_dir / 'buildx.mixin').write_text(body)
         (mixin_dir / 'index.yaml').write_text('mixin:\n  - buildx.mixin\n')
 
-        logger.info(f"✓ Wrote colcon mixin to {mixin_dir}")
-        logger.info("ℹ Register it with:")
-        logger.info(f"    colcon mixin add buildx file://{mixin_dir}/index.yaml")
-        logger.info("    colcon mixin update buildx")
+        # Printed: --emit-mixin asked for this, and the commands are the
+        # only way to know how to use what it wrote.
+        print(f"✓ Wrote colcon mixin to {mixin_dir}")
+        print("ℹ️  Register it once, then build with `colcon build --mixin buildx`:")
+        print(f"    colcon mixin add buildx file://{mixin_dir}/index.yaml")
+        print("    colcon mixin update buildx")
 
     def build(self, extra_args=None):
         """Execute colcon build inside the sourced SDK environment."""
@@ -175,7 +168,7 @@ class SdkBuilder:
                 "💡 The SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in "
                 "meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK "
                 "when building the SDK.")
-            logger.info("ℹ Pass --toolchain to point at the toolchain file directly.")
+            logger.error("💡 Or pass --toolchain to point at the toolchain file directly.")
             return 1
 
         # Printed rather than logged: which sysroot and SOABI a cross-build
