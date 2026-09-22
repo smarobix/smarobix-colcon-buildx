@@ -11,8 +11,10 @@ using rosdep in both Docker and SSHFS cross-compilation methods.
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Set, List
+from typing import Set
 from datetime import datetime
+
+from colcon_buildx import DEFAULT_ROS_DISTRO
 
 
 def parse_workspace_deps(workspace_path: Path) -> Set[str]:
@@ -44,7 +46,7 @@ def parse_workspace_deps(workspace_path: Path) -> Set[str]:
 
             # Extract dependencies from various tags
             for dep_type in ['depend', 'build_depend', 'exec_depend',
-                           'build_export_depend', 'buildtool_depend']:
+                             'build_export_depend', 'buildtool_depend']:
                 for dep in root.findall(dep_type):
                     if dep.text:
                         dependencies.add(dep.text.strip())
@@ -81,7 +83,7 @@ def install_deps_docker(
     from colcon_buildx.package_sync import generate_synced_tag, commit_synced_image, save_sync_manifest
 
     print(f"\n{'='*60}")
-    print(f"Installing ROS dependencies in Docker image...")
+    print("Installing ROS dependencies in Docker image...")
     print(f"{'='*60}\n")
 
     # Parse dependencies
@@ -153,7 +155,7 @@ echo "Dependencies installed successfully!"
             if 'Installing' in line or 'installed' in line or 'already installed' in line:
                 print(f"  {line}")
 
-        print(f"✓ Successfully installed workspace dependencies")
+        print("✓ Successfully installed workspace dependencies")
 
         # Commit container to new synced image
         new_tag = generate_synced_tag(image)
@@ -175,7 +177,7 @@ echo "Dependencies installed successfully!"
         save_sync_manifest(metadata, manifest_path)
 
         print(f"\n{'='*60}")
-        print(f"✓ Dependencies installed!")
+        print("✓ Dependencies installed!")
         print(f"✓ Created synced image: {new_tag}")
         print(f"{'='*60}\n")
 
@@ -198,7 +200,7 @@ def install_deps_sshfs(
     Install ROS dependencies on remote device via SSH using rosdep.
 
     Args:
-        ssh_target: SSH connection string (e.g., 'ubuntu@192.168.1.100')
+        ssh_target: SSH connection string (e.g., 'ubuntu@10.42.0.3')
         workspace_path: Local path to workspace root
         rosdep_args: Additional arguments for rosdep install
 
@@ -217,7 +219,7 @@ def install_deps_sshfs(
 
     # We need to copy the src directory to the device temporarily
     # to let rosdep analyze the dependencies
-    print(f"📤 Copying workspace src to device for analysis...")
+    print("📤 Copying workspace src to device for analysis...")
 
     # Create remote temp directory
     temp_dir_cmd = ['ssh', ssh_target, 'mktemp -d']
@@ -244,10 +246,10 @@ def install_deps_sshfs(
             print(f"❌ Failed to sync workspace to device: {rsync_result.stderr}")
             return False
 
-        print(f"✓ Workspace synced to device")
+        print("✓ Workspace synced to device")
 
         # Run rosdep install on device
-        print(f"📦 Running rosdep install on device...")
+        print("📦 Running rosdep install on device...")
 
         # Detect ROS distro on device first
         detect_distro_cmd = "ls /opt/ros/ 2>/dev/null | head -1"
@@ -255,7 +257,7 @@ def install_deps_sshfs(
             ['ssh', ssh_target, detect_distro_cmd],
             capture_output=True, text=True, timeout=10
         )
-        ros_distro = distro_result.stdout.strip() or 'jazzy'
+        ros_distro = distro_result.stdout.strip() or DEFAULT_ROS_DISTRO
         print(f"  Detected ROS distro on device: {ros_distro}")
 
         # Build the rosdep command as a single string for SSH
@@ -280,17 +282,17 @@ def install_deps_sshfs(
         )
 
         if install_result.returncode != 0:
-            print(f"❌ rosdep install failed on device")
+            print("❌ rosdep install failed on device")
             return False
 
         print(f"\n{'='*60}")
-        print(f"✓ Successfully installed dependencies on device")
+        print("✓ Successfully installed dependencies on device")
         print(f"{'='*60}\n")
 
         return True
 
     except subprocess.TimeoutExpired:
-        print(f"❌ Dependency installation timed out after 10 minutes")
+        print("❌ Dependency installation timed out after 10 minutes")
         return False
     except Exception as e:
         print(f"❌ Error during dependency installation: {e}")
@@ -299,25 +301,3 @@ def install_deps_sshfs(
         # Clean up remote temp directory
         cleanup_cmd = ['ssh', ssh_target, f'rm -rf {remote_temp}']
         subprocess.run(cleanup_cmd, capture_output=True, check=False, timeout=10)
-
-
-def check_rosdep_installed(ssh_target: str = None) -> bool:
-    """
-    Check if rosdep is installed (locally or on remote device).
-
-    Args:
-        ssh_target: Optional SSH target to check remote device. If None, checks locally.
-
-    Returns:
-        True if rosdep is available, False otherwise
-    """
-    if ssh_target:
-        check_cmd = ['ssh', ssh_target, 'which', 'rosdep']
-    else:
-        check_cmd = ['which', 'rosdep']
-
-    try:
-        result = subprocess.run(check_cmd, capture_output=True, timeout=5)
-        return result.returncode == 0
-    except:
-        return False

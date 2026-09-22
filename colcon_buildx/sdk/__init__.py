@@ -14,7 +14,6 @@ hand-maintained SOABI strings and host libpython symlinks that cross-compiling
 against a vendor sysroot otherwise needs.
 """
 
-import os
 import shlex
 import subprocess
 import sys

@@ -47,8 +47,8 @@ def deploy(install_dir, target, workspace_root=None):
     ]
 
     try:
-        result = subprocess.run(cmd, check=True)
-        logger.info(f"✓ Deployment successful")
+        subprocess.run(cmd, check=True)
+        logger.info("✓ Deployment successful")
         return 0
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ Deployment failed with exit code {e.returncode}")

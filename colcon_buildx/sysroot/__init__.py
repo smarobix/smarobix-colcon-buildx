@@ -9,6 +9,7 @@ from pathlib import Path
 
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx import ROS_DISTROS
 from colcon_buildx.workspace import resolve_workspace_root
 
 logger = colcon_logger.getChild(__name__)
@@ -23,7 +24,7 @@ class SysrootBuilder:
         Initialize sysroot builder.
 
         Args:
-            sysroot_host: Hostname/IP of target board (e.g., kria-vision-home)
+            sysroot_host: Hostname/IP of target board (e.g., my-board)
             sysroot_mount: Local mount point for sysroot
             toolchain_file: Path to CMake toolchain file
             build_base: Build directory
@@ -73,7 +74,7 @@ class SysrootBuilder:
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
             logger.info(f"✓ Sysroot mounted at {self.sysroot_mount}")
             self._mounted_by_us = True
             return True
@@ -111,7 +112,7 @@ class SysrootBuilder:
                 logger.info("✓ Sysroot unmounted")
                 return True
             except subprocess.CalledProcessError:
-                logger.warning(f"⚠️  Failed to unmount sysroot")
+                logger.warning("⚠️  Failed to unmount sysroot")
                 return False
 
     def install_dependencies(self, rosdep_args='--ignore-src -y'):
@@ -146,8 +147,7 @@ class SysrootBuilder:
         env['SYSROOT_PATH'] = str(self.sysroot_mount)
 
         # ROS setup - try to detect ROS distro
-        ros_distros = ['jazzy', 'humble', 'iron', 'rolling']
-        for distro in ros_distros:
+        for distro in ROS_DISTROS:
             ros_path = self.sysroot_mount / 'opt' / 'ros' / distro
             if ros_path.exists():
                 env['CMAKE_PREFIX_PATH'] = f'{ros_path}:{self.sysroot_mount}/usr/lib/aarch64-linux-gnu/cmake'
@@ -161,7 +161,9 @@ class SysrootBuilder:
             if python_path.exists():
                 env['PYTHON_EXECUTABLE'] = str(python_path)
                 env['PYTHON_INCLUDE_DIR'] = str(self.sysroot_mount / 'usr' / 'include' / f'python{py_ver}')
-                env['PYTHON_LIBRARY'] = str(self.sysroot_mount / 'usr' / 'lib' / 'aarch64-linux-gnu' / f'libpython{py_ver}.so')
+                env['PYTHON_LIBRARY'] = str(
+                    self.sysroot_mount / 'usr' / 'lib' / 'aarch64-linux-gnu' /
+                    f'libpython{py_ver}.so')
                 logger.info(f"✓ Using Python {py_ver} from sysroot")
                 break
 

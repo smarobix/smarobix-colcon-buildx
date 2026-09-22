@@ -12,6 +12,7 @@ from datetime import datetime
 
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx import DEFAULT_ROS_DISTRO, ROS_DISTROS
 from colcon_buildx.workspace import resolve_workspace_root
 
 logger = colcon_logger.getChild(__name__)
@@ -71,7 +72,6 @@ class DockerBuilder:
         self.install_base = install_base
         self.toolchain = toolchain
         self.workspace_root = resolve_workspace_root(workspace_root)
-        self.container_name = 'colcon-buildx-builder'
         self.use_base_image = use_base_image
 
         # Populated from image labels once the image is available locally.
@@ -132,7 +132,9 @@ class DockerBuilder:
                     regex_pattern = f"{re.escape(base_tag_clean)}-synced-\\d{{8}}$"
                     is_match = re.match(regex_pattern, tag)
 
-                    logger.debug(f"   Checking: {line} → repo={repo}, tag={tag}, pattern={regex_pattern}, match={bool(is_match)}")
+                    logger.debug(
+                        f"   Checking: {line} → repo={repo}, tag={tag}, "
+                        f"pattern={regex_pattern}, match={bool(is_match)}")
 
                     # generate_synced_tag keeps the repository, so a synced
                     # copy of this image lives in the same one. The same tag in
@@ -177,7 +179,7 @@ class DockerBuilder:
         Create a synced version of the base image from target device.
 
         Args:
-            ssh_target: SSH connection string (e.g., 'ubuntu@192.168.1.100')
+            ssh_target: SSH connection string (e.g., 'ubuntu@10.42.0.3')
 
         Returns:
             New synced image tag, or None if sync failed
@@ -342,13 +344,14 @@ class DockerBuilder:
             return labelled
 
         image_lower = self.image.lower()
-        for distro in ('jazzy', 'humble', 'iron', 'rolling'):
+        for distro in ROS_DISTROS:
             if distro in image_lower:
                 return distro
         logger.warning(
-            f"⚠️  Could not determine ROS distro from '{self.image}', assuming jazzy. "
-            f"Set the {LABEL_ROS_DISTRO} label on the image to be explicit.")
-        return 'jazzy'
+            f"⚠️  Could not determine ROS distro from '{self.image}', assuming "
+            f"{DEFAULT_ROS_DISTRO}. Set the {LABEL_ROS_DISTRO} label on the image "
+            "to be explicit.")
+        return DEFAULT_ROS_DISTRO
 
     def _native_command(self, build_dir, install_dir, extra_args):
         """docker run for an image that runs as the target architecture."""
