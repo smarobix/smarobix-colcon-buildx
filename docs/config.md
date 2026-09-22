@@ -21,7 +21,7 @@ colcon-buildx reads at most one config file per run, in one of two formats with 
 
 With `--config PATH`, colcon-buildx reads that file. The format follows the extension: `.yml` and `.yaml` are read as YAML, anything else as `key = value`. If the file doesn't exist, it prints `Specified config file not found: PATH` and carries on with no config file.
 
-Without `--config`, it starts in the current directory and looks for `.buildx.conf`, `.buildx.yml` and `.buildx.yaml`, in that order. If none is there, it moves up to the parent directory and tries again. It stops at the workspace root, the directory that contains `src/`, and looks at five directories in all, the current one included. The first file it finds is the only one it reads; files are never merged.
+Without `--config`, it starts in the current directory and looks for `.buildx.conf`, `.buildx.yml` and `.buildx.yaml`, in that order. If none is there, it moves up to the parent directory and tries again. It stops at the workspace root, the directory that contains `src/`, and looks at five directories in all, the current one included. It reads the first file it finds; files are never merged.
 
 A run prints the file it read, so you can tell which one it was:
 

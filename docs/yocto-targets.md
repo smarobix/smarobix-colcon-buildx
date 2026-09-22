@@ -24,7 +24,7 @@ colcon buildx --method docker \
   --cmake-args -DBUILD_TESTING=OFF
 ```
 
-**Dev container.** An aarch64 image of the board's own userspace plus compilers and `-dev` packages, which bitbake builds from the same configuration as the board image (recipe `ros-dev-container`). It compiles natively, under QEMU on x86_64, and it is the only route that also generates Python message bindings. Its kind label is `yocto-native`, which colcon-buildx handles like any image that runs as the target.
+**Dev container.** An aarch64 image of the board's own userspace plus compilers and `-dev` packages, which bitbake builds from the same configuration as the board image (recipe `ros-dev-container`). It compiles natively, under QEMU on x86_64, and of the three routes it is the one that also generates Python message bindings. Its kind label is `yocto-native`, which colcon-buildx handles like any image that runs as the target.
 
 ```bash
 colcon buildx --method docker --docker-platform linux/arm64 \
