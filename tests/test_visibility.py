@@ -70,6 +70,26 @@ def test_install_deps_with_docker_warns_with_the_workflow(workspace, monkeypatch
     assert 'colcon buildx --install-deps-on-device SSH_TARGET' in caplog.text
 
 
+@pytest.mark.parametrize('key, flag', [
+    ('sync_from_device', '--sync-from-device'),
+    ('install_deps_on_device', '--install-deps-on-device'),
+])
+def test_an_action_in_a_config_file_is_named_and_ignored(
+        workspace, monkeypatch, caplog, key, flag):
+    (workspace / '.buildx.conf').write_text(
+        f'method = sdk\nsdk_env = /opt/sdk/env\n{key} = ubuntu@10.42.0.3\n')
+    built = []
+    monkeypatch.setattr(SdkBuilder, 'build', lambda self, extra_args=None: built.append(1) or 0)
+
+    with caplog.at_level(logging.WARNING):
+        assert _run_verb([]) == 0
+
+    assert f'{key} is a command-line action, not a config key' in caplog.text
+    assert f'colcon buildx {flag} <user@host>' in caplog.text
+    # The build went ahead; the action did not run.
+    assert built == [1]
+
+
 def test_config_file_in_use_is_printed(workspace, monkeypatch, capsys, caplog):
     (workspace / '.buildx.conf').write_text(
         'method = sdk\nsdk_env = /opt/sdk/env\ninstall_deps = true\n')

@@ -11,7 +11,7 @@ from colcon_buildx.config import (
     find_config_file, load_config, load_conf_config, load_yaml_config,
     merge_settings,
 )
-from colcon_buildx.verb.buildx import BuildxVerb, CONFIG_KEYS, DEFAULTS
+from colcon_buildx.verb.buildx import ACTION_FLAGS, BuildxVerb, CONFIG_KEYS, DEFAULTS
 
 EXAMPLES = Path(__file__).resolve().parent.parent / 'examples'
 
@@ -143,6 +143,18 @@ def test_command_line_beats_file_beats_defaults(workspace, parser, name, text):
     assert args.docker_platform == 'linux/arm64'           # command line
     assert args.build_base == 'file_build'                 # config file
     assert args.install_base == DEFAULTS['install_base']   # default
+
+
+# --- one-off actions are not settings -----------------------------------------
+
+@pytest.mark.parametrize('key', ACTION_FLAGS)
+def test_action_flags_are_not_config_keys(parser, key):
+    # A config file that names one would turn every build in the workspace
+    # into a device sync that exits without building.
+    assert key not in CONFIG_KEYS
+    args = parser.parse_args([])
+    assert merge_settings(args, {key: 'ubuntu@10.42.0.3'}, DEFAULTS, CONFIG_KEYS) == [key]
+    assert getattr(args, key) is None
 
 
 # --- the shipped examples -----------------------------------------------------

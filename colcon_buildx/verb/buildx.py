@@ -47,9 +47,12 @@ CONFIG_KEYS = frozenset(DEFAULTS) | {
     'toolchain',
     'sdk_env',
     'deploy_target',
-    'sync_from_device',
-    'install_deps_on_device',
 }
+
+# One-off actions that replace the build and then exit. They are flags only: a
+# config file carrying one would turn every build in that workspace into a
+# device sync, which is why they are called out rather than merely ignored.
+ACTION_FLAGS = ('sync_from_device', 'install_deps_on_device')
 
 # Shown after the options in --help. colcon keeps its line breaks, so it is
 # wrapped by hand; the names and numbers come from the code it describes.
@@ -315,7 +318,13 @@ class BuildxVerb(VerbExtensionPoint):
             print(f"ℹ️  Config file: {config_file}")
         unknown = merge_settings(args, config, DEFAULTS, CONFIG_KEYS)
         for key in unknown:
-            logger.warning(f"⚠ Ignoring unrecognised config key: {key}")
+            if key in ACTION_FLAGS:
+                flag = '--' + key.replace('_', '-')
+                logger.warning(
+                    f"⚠ {key} is a command-line action, not a config key; ignoring it. "
+                    f"Run `colcon buildx {flag} <user@host>` instead.")
+            else:
+                logger.warning(f"⚠ Ignoring unrecognised config key: {key}")
 
         # choices= no longer covers a value arriving from the config file.
         if args.method not in METHODS:
