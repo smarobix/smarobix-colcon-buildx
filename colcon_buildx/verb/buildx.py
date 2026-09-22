@@ -145,7 +145,7 @@ class BuildxVerb(VerbExtensionPoint):
             metavar='FILE',
             type=str,
             help='Read settings from FILE instead of searching for a config '
-                 'file; see "Configuration files" below'
+                 'file; see the Notes below'
         )
         parser.add_argument(
             '--build-base',
