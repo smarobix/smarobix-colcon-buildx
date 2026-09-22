@@ -22,6 +22,8 @@ from pathlib import Path
 
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx.workspace import resolve_workspace_root
+
 logger = colcon_logger.getChild(__name__)
 
 # Variables read back out of the sourced SDK environment.
@@ -38,7 +40,7 @@ class SdkBuilder:
     """Handles cross-compilation using an OE/Yocto SDK installed on this host."""
 
     def __init__(self, env_setup, build_base, install_base,
-                 toolchain_file=None, emit_mixin=False):
+                 toolchain_file=None, emit_mixin=False, workspace_root=None):
         """
         Initialize SDK builder.
 
@@ -48,25 +50,14 @@ class SdkBuilder:
             install_base: Install directory
             toolchain_file: Override for the SDK's own CMake toolchain file
             emit_mixin: Also write a colcon mixin describing these settings
+            workspace_root: Workspace root; found from the current directory by default
         """
         self.env_setup = [p for p in str(env_setup).split(':') if p]
         self.build_base = build_base
         self.install_base = install_base
         self.toolchain_file = toolchain_file
         self.emit_mixin = emit_mixin
-        self.workspace_root = self._find_workspace_root()
-
-    def _find_workspace_root(self):
-        """Find the workspace root by looking for src/ directory."""
-        current = Path.cwd()
-        for _ in range(5):
-            if (current / 'src').is_dir():
-                return current
-            parent = current.parent
-            if parent == current:
-                break
-            current = parent
-        return Path.cwd()
+        self.workspace_root = resolve_workspace_root(workspace_root)
 
     def check_host(self):
         """Yocto SDK installers are Linux binaries; nothing else can run them."""

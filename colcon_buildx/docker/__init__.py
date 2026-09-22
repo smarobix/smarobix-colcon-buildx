@@ -8,10 +8,11 @@ import os
 import shlex
 import subprocess
 import re
-from pathlib import Path
 from datetime import datetime
 
 from colcon_core.logging import colcon_logger
+
+from colcon_buildx.workspace import resolve_workspace_root
 
 logger = colcon_logger.getChild(__name__)
 
@@ -49,7 +50,8 @@ def _user_args():
 class DockerBuilder:
     """Handles cross-compilation using Docker containers."""
 
-    def __init__(self, image, platform, build_base, install_base, use_base_image=False):
+    def __init__(self, image, platform, build_base, install_base, use_base_image=False,
+                 workspace_root=None):
         """
         Initialize Docker builder.
 
@@ -59,12 +61,13 @@ class DockerBuilder:
             build_base: Build directory
             install_base: Install directory
             use_base_image: Force use of base image, skip synced image detection
+            workspace_root: Workspace root; found from the current directory by default
         """
         self.base_image = image
         self.platform = platform
         self.build_base = build_base
         self.install_base = install_base
-        self.workspace_root = self._find_workspace_root()
+        self.workspace_root = resolve_workspace_root(workspace_root)
         self.container_name = 'colcon-buildx-builder'
         self.use_base_image = use_base_image
 
@@ -78,18 +81,6 @@ class DockerBuilder:
             self.image = self.detect_synced_image()
         else:
             self.image = self.base_image
-
-    def _find_workspace_root(self):
-        """Find the workspace root by looking for src/ directory."""
-        current = Path.cwd()
-        for _ in range(5):
-            if (current / 'src').is_dir():
-                return current
-            parent = current.parent
-            if parent == current:
-                break
-            current = parent
-        return Path.cwd()
 
     def detect_synced_image(self):
         """

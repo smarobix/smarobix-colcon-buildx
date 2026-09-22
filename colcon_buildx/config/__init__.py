@@ -8,6 +8,8 @@ import yaml
 
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx.workspace import search_path
+
 logger = colcon_logger.getChild(__name__)
 
 # Looked for in this order in each directory; the first one found is used and
@@ -21,9 +23,9 @@ def find_config_file(config_path=None):
 
     Searches in order:
     1. Provided path (--config argument)
-    2. .buildx.conf in current directory
-    3. .buildx.yml / .buildx.yaml in current directory
-    4. Same files in parent directories (up to workspace root with src/)
+    2. .buildx.conf, .buildx.yml, .buildx.yaml in the current directory
+    3. The same names in each parent directory, stopping at the workspace
+       root (the first directory with src/) or after MAX_LEVELS directories
 
     Args:
         config_path: Optional explicit path to config file
@@ -38,24 +40,12 @@ def find_config_file(config_path=None):
         logger.warning(f"Specified config file not found: {config_path}")
         return None
 
-    # Search for config file in current directory and parents
-    current = Path.cwd()
-
-    for _ in range(5):  # Search up to 5 levels
+    for directory in search_path():
         for name in CONFIG_NAMES:
-            config_file = current / name
+            config_file = directory / name
             if config_file.exists():
                 logger.debug(f"Found configuration file: {config_file}")
                 return config_file
-
-        # Check if we're at workspace root (has src/ directory)
-        if (current / 'src').is_dir():
-            break
-
-        parent = current.parent
-        if parent == current:  # Reached filesystem root
-            break
-        current = parent
 
     return None
 

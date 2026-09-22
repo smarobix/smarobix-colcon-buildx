@@ -9,6 +9,8 @@ from colcon_core.plugin_system import satisfies_version
 from colcon_core.verb import VerbExtensionPoint
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx.workspace import MAX_LEVELS, find_workspace_root
+
 logger = colcon_logger.getChild(__name__)
 
 METHODS = ('docker', 'sysroot', 'sdk')
@@ -47,17 +49,23 @@ CONFIG_KEYS = frozenset(DEFAULTS) | {
 }
 
 
-def _find_workspace_root(start=None):
-    """Walk up from *start* to the directory containing src/."""
-    current = Path(start or Path.cwd())
-    for _ in range(5):
-        if (current / 'src').is_dir():
-            return current
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return Path(start or Path.cwd())
+def _workspace_root():
+    """
+    Return the workspace root, or the current directory with a warning.
+
+    Falling back silently meant a run from outside the workspace built,
+    mounted and synced the wrong directory without saying so.
+    """
+    root = find_workspace_root()
+    if root is not None:
+        return root
+
+    cwd = Path.cwd()
+    logger.warning(
+        f"⚠ No workspace root found: neither {cwd} nor the directories above it "
+        f"(up to {MAX_LEVELS} levels) contain a src/ directory. Using {cwd} as the "
+        "workspace root; run colcon buildx from your workspace root instead.")
+    return cwd
 
 
 class BuildxVerb(VerbExtensionPoint):
@@ -219,6 +227,8 @@ class BuildxVerb(VerbExtensionPoint):
 
         logger.info(f"🔧 Cross-compilation method: {args.method}")
 
+        workspace_root = _workspace_root()
+
         try:
             # Handle --install-deps-on-device (standalone operation, works with any method)
             if args.install_deps_on_device:
@@ -228,7 +238,7 @@ class BuildxVerb(VerbExtensionPoint):
 
                 success = install_deps_sshfs(
                     args.install_deps_on_device,
-                    _find_workspace_root(),
+                    workspace_root,
                     args.rosdep_args
                 )
                 if not success:
@@ -257,7 +267,8 @@ class BuildxVerb(VerbExtensionPoint):
                     toolchain_file=args.toolchain,
                     build_base=args.build_base,
                     install_base=args.install_base,
-                    no_mount=args.no_mount
+                    no_mount=args.no_mount,
+                    workspace_root=workspace_root
                 )
 
                 # Install dependencies if requested
@@ -280,7 +291,8 @@ class BuildxVerb(VerbExtensionPoint):
                     build_base=args.build_base,
                     install_base=args.install_base,
                     toolchain_file=args.toolchain,
-                    emit_mixin=args.emit_mixin
+                    emit_mixin=args.emit_mixin,
+                    workspace_root=workspace_root
                 )
 
             elif args.method == 'docker':
@@ -297,7 +309,8 @@ class BuildxVerb(VerbExtensionPoint):
                     platform=args.docker_platform,
                     build_base=args.build_base,
                     install_base=args.install_base,
-                    use_base_image=args.use_base_image
+                    use_base_image=args.use_base_image,
+                    workspace_root=workspace_root
                 )
 
                 # Sync from device if requested (standalone operation)
