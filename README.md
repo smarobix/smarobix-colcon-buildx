@@ -243,4 +243,4 @@ The repository still ships a 269-line standalone bash script at `bin/kria-build`
 
 ## License
 
-Apache License 2.0, as declared in `pyproject.toml`.
+Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2025-2026 SMAROBIX GmbH.

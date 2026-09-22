@@ -1,6 +1,10 @@
+# SPDX-FileCopyrightText: 2025-2026 SMAROBIX GmbH
+# SPDX-License-Identifier: Apache-2.0
+
 [build-system]
-# 61 is the first setuptools release that reads [project] metadata (PEP 621).
-requires = ["setuptools>=61", "wheel", "setuptools_scm[toml]>=6.2"]
+# 77 is the first setuptools release that accepts an SPDX licence expression
+# together with license-files (PEP 639).
+requires = ["setuptools>=77", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,8 +12,10 @@ name = "colcon-buildx"
 dynamic = ["version"]
 description = "A colcon verb that cross-builds ROS 2 workspaces for arm64 and armhf boards, inside a Docker image or against a Yocto/OE SDK"
 readme = "README.md"
-requires-python = ">=3.8"
-license = {text = "Apache License 2.0"}
+# setuptools 77, needed for the licence metadata below, runs on Python 3.9+.
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
     {name = "SMAROBIX GmbH"},
 ]
@@ -32,7 +38,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Plugins",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX",
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Build Tools",

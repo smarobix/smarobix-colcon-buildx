@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-2026 SMAROBIX GmbH
+# SPDX-License-Identifier: Apache-2.0
+
 """Yocto / OpenEmbedded SDK cross-compilation builder.
 
 Uses an SDK produced by ``bitbake -c populate_sdk`` and installed on this host,
