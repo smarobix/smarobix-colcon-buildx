@@ -58,9 +58,9 @@ Configuration files:
   Settings can also come from a file. Without --config, colcon buildx looks
   in the current directory for {', '.join(CONFIG_NAMES[:-1])} and {CONFIG_NAMES[-1]},
   in that order, then in each parent directory in turn. The search stops at
-  the workspace root, the first directory that holds src/, and after at most
-  {MAX_LEVELS} directories, the current one included. The first file found
-  is used; files are not merged.
+  the workspace root, the first directory that holds src/, and after at
+  most {MAX_LEVELS} directories, the current one included. The first file found is
+  used; files are not merged.
 
   Keys are the long option names with underscores, e.g. docker_image for
   --docker-image. --config and the arguments passed through to colcon build
