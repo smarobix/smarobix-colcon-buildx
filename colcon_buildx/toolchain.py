@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-2026 SMAROBIX GmbH
+# SPDX-License-Identifier: Apache-2.0
+
 """CMake toolchain wrapper shared by the SDK-based backends.
 
 An OE/Yocto SDK ships a stock CMake toolchain file that is fine for building a

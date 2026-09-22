@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-2026 SMAROBIX GmbH
+# SPDX-License-Identifier: Apache-2.0
+
 """Make the extension importable where colcon itself is not installed."""
 
 import logging

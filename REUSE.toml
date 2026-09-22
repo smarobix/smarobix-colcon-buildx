@@ -1,0 +1,22 @@
+version = 1
+SPDX-PackageName = "smarobix-colcon-buildx"
+SPDX-PackageDownloadLocation = "https://github.com/smarobix/smarobix-colcon-buildx"
+
+# Files that cannot carry a comment header, or where one would get in the
+# reader's way (documentation, example configs meant to be copied, data).
+# docs/ and examples/ are listed ahead of time so new pages and examples are
+# covered without editing this file. "closest" lets a file that does carry its
+# own SPDX header, such as a source file under examples/, override this.
+[[annotations]]
+path = [
+    "**.md",
+    "**.example",
+    "**.json",
+    ".gitignore",
+    "NOTICE",
+    "docs/**",
+    "examples/**",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2025-2026 SMAROBIX GmbH"
+SPDX-License-Identifier = "Apache-2.0"
