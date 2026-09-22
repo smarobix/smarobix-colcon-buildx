@@ -3,12 +3,15 @@
 
 """Cross-compilation build verb for colcon."""
 
+import re
+import textwrap
 from pathlib import Path
 
 from colcon_core.plugin_system import satisfies_version
 from colcon_core.verb import VerbExtensionPoint
 from colcon_core.logging import colcon_logger
 
+from colcon_buildx.config import CONFIG_NAMES
 from colcon_buildx.workspace import MAX_LEVELS, find_workspace_root
 
 logger = colcon_logger.getChild(__name__)
@@ -48,6 +51,50 @@ CONFIG_KEYS = frozenset(DEFAULTS) | {
     'install_deps_on_device',
 }
 
+# Shown after the options in --help. colcon keeps its line breaks, so it is
+# wrapped by hand; the names and numbers come from the code it describes.
+EPILOG = f"""\
+Configuration files:
+  Settings can also come from a file. Without --config, colcon buildx looks
+  in the current directory for {', '.join(CONFIG_NAMES[:-1])} and {CONFIG_NAMES[-1]},
+  in that order, then in each parent directory in turn. The search stops at
+  the workspace root, the first directory that holds src/, and after at most
+  {MAX_LEVELS} directories, the current one included. The first file found
+  is used; files are not merged.
+
+  Keys are the long option names with underscores, e.g. docker_image for
+  --docker-image. --config and the arguments passed through to colcon build
+  cannot be set in a file. Commented examples of every key:
+  https://github.com/smarobix/smarobix-colcon-buildx/tree/main/examples
+
+Precedence:
+  command line > config file > built-in defaults.
+  An on/off option such as --deploy can only switch a setting on from the
+  command line; if the config file switches it on, edit the file to turn it
+  off.
+"""
+
+
+def _without_hyphen_breaks(formatter_class):
+    """
+    Return *formatter_class*, changed to wrap help text only at spaces.
+
+    argparse also wraps at hyphens, which splits option names across lines:
+    "--install-deps-on-" then "device". That reads as a different option, and
+    the reference docs are generated from this text. Line breaks written into
+    a help string are kept, as colcon's own formatter does.
+    """
+    class Formatter(formatter_class):
+        def _split_lines(self, text, width):
+            lines = []
+            for line in text.splitlines():
+                line = re.sub(r'\s+', ' ', line).strip()
+                lines += textwrap.wrap(
+                    line, width, break_on_hyphens=False, break_long_words=False) or ['']
+            return lines
+
+    return Formatter
+
 
 def _workspace_root():
     """
@@ -69,7 +116,7 @@ def _workspace_root():
 
 
 class BuildxVerb(VerbExtensionPoint):
-    """Cross-compile ROS 2 workspace for embedded ARM boards."""
+    """Cross-compile a ROS 2 workspace for arm64 and armhf boards."""
 
     def __init__(self):
         super().__init__()
@@ -77,132 +124,178 @@ class BuildxVerb(VerbExtensionPoint):
 
     def add_arguments(self, *, parser):
         """Add command line arguments for cross-compilation."""
-        # Build method
+        # colcon's formatter keeps the epilog's line breaks as written.
+        parser.epilog = EPILOG
+        parser.formatter_class = _without_hyphen_breaks(parser.formatter_class)
+
         parser.add_argument(
             '--method',
             choices=list(METHODS),
             default=None,
-            help='Build method: docker (container-based), sysroot (SSHFS mount), '
-                 'or sdk (Yocto/OpenEmbedded SDK on this host). Default: docker'
+            help='How to build: docker builds in a container image; sdk builds '
+                 'against a Yocto/OE SDK installed on this Linux host; sysroot '
+                 "builds against the board's root filesystem mounted over SSHFS "
+                 f"(experimental). Default: {DEFAULTS['method']}"
         )
-
-        # Common arguments
         parser.add_argument(
             '--config',
+            metavar='FILE',
             type=str,
-            help='Configuration file (default: search for .buildx.conf or .buildx.yml in workspace)'
+            help='Read settings from FILE instead of searching for a config '
+                 'file; see "Configuration files" below'
         )
         parser.add_argument(
             '--build-base',
+            metavar='DIR',
             default=None,
-            help='Build directory for cross-compiled artifacts (default: cross_build)'
+            help='Build directory, relative to the workspace root '
+                 f"(default: {DEFAULTS['build_base']})"
         )
         parser.add_argument(
             '--install-base',
+            metavar='DIR',
             default=None,
-            help='Install directory for cross-compiled artifacts (default: cross_install)'
+            help='Install directory, relative to the workspace root; --deploy '
+                 f"copies it to the board (default: {DEFAULTS['install_base']})"
         )
-
-        # Sysroot-specific arguments
-        sysroot_group = parser.add_argument_group('SSHFS Sysroot Options (--method sysroot)')
-        sysroot_group.add_argument(
-            '--sysroot-host',
-            help='Hostname or IP of the target board for sysroot access (e.g., kria-vision-home)'
-        )
-        sysroot_group.add_argument(
-            '--sysroot-mount',
-            default=None,
-            help='Local mount point for board sysroot (default: ~/mnt/board-sysroot)'
-        )
-        sysroot_group.add_argument(
+        parser.add_argument(
             '--toolchain',
-            help='Path to CMake toolchain file (required for sysroot method)'
-        )
-        sysroot_group.add_argument(
-            '--no-mount',
-            action='store_true',
-            default=None,
-            help='Skip SSHFS mounting (assume sysroot already mounted)'
+            metavar='FILE',
+            help='CMake toolchain file. Required for --method sysroot. With '
+                 '--method sdk, or --method docker and a cross SDK image, it '
+                 "replaces the SDK's own toolchain file (OE_CMAKE_TOOLCHAIN_FILE); "
+                 'for an image, give the path inside the container. Images that '
+                 'run as the target ignore it'
         )
 
-        # Note: --install-deps and --rosdep-args also work with sysroot method
-
-        # Docker-specific arguments
-        docker_group = parser.add_argument_group('Docker Options (--method docker)')
+        docker_group = parser.add_argument_group('Docker options (--method docker)')
         docker_group.add_argument(
             '--docker-image',
-            help='Docker image for cross-compilation (e.g., ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy)'
+            metavar='IMAGE',
+            help='Image to build in; required for --method docker, e.g. '
+                 'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy. If a local '
+                 '<tag>-synced-YYYYMMDD copy of it exists, made by '
+                 '--sync-from-device or --install-deps, the newest one is used '
+                 'instead'
         )
         docker_group.add_argument(
             '--docker-platform',
+            metavar='PLATFORM',
             default=None,
-            help='Target platform for Docker (default: linux/arm64). Ignored for '
-                 'cross SDK images, which run on the host architecture.'
-        )
-        docker_group.add_argument(
-            '--sync-from-device',
-            metavar='SSH_TARGET',
-            help='Sync package versions from target device (e.g., ubuntu@192.168.1.100). Creates local synced image.'
+            help='Docker platform of the target, which the image runs as: '
+                 'linux/arm64, or linux/arm/v7 for armhf boards. Also used by '
+                 '--sync-from-device and --install-deps. Cross SDK images ignore '
+                 'it and run on the host architecture '
+                 f"(default: {DEFAULTS['docker_platform']})"
         )
         docker_group.add_argument(
             '--use-base-image',
             action='store_true',
             default=None,
-            help='Force use of base image, skip auto-detection of synced images'
+            help='Build in --docker-image itself, even if a local -synced- copy '
+                 'of it exists'
         )
         docker_group.add_argument(
-            '--install-deps',
-            action='store_true',
-            default=None,
-            help='Install workspace dependencies using rosdep in Docker image (for dev only, see --install-deps-on-device)'
-        )
-        docker_group.add_argument(
-            '--rosdep-args',
-            default=None,
-            help='Additional arguments to pass to rosdep install (default: --ignore-src -y)'
+            '--sync-from-device',
+            metavar='SSH_TARGET',
+            help="Read the board's installed Debian packages over SSH, install "
+                 'the same versions into a copy of --docker-image, tag it '
+                 '<tag>-synced-YYYYMMDD, and exit without building. '
+                 'E.g. ubuntu@10.42.0.3. Not for cross SDK images'
         )
 
-        # SDK-specific arguments
-        sdk_group = parser.add_argument_group('OE/Yocto SDK Options (--method sdk)')
+        sdk_group = parser.add_argument_group('SDK options (--method sdk)')
         sdk_group.add_argument(
             '--sdk-env',
-            help='Colon-separated list of SDK scripts to source, in order '
-                 '(e.g. /opt/ros-sdk/environment-setup-cortexa72-cortexa53-poky-linux)'
+            metavar='SCRIPTS',
+            help='SDK environment script to source; several are separated by '
+                 'colons and sourced in order. Required for --method sdk, e.g. '
+                 '/opt/ros-sdk/environment-setup-cortexa72-cortexa53-oe-linux'
         )
         sdk_group.add_argument(
             '--emit-mixin',
             action='store_true',
             default=None,
-            help='Write a colcon mixin describing the SDK cross-build settings, for '
-                 'use with plain `colcon build --mixin` outside this extension'
+            help='Also write a colcon mixin with the SDK cross-build settings to '
+                 '.buildx/mixin/ in the workspace, for a plain '
+                 '`colcon build --mixin buildx`'
         )
 
-        # Device dependency installation
-        deps_group = parser.add_argument_group('Device Dependency Options')
+        sysroot_group = parser.add_argument_group(
+            'SSHFS sysroot options (--method sysroot, experimental)')
+        sysroot_group.add_argument(
+            '--sysroot-host',
+            metavar='HOST',
+            help='Board whose root filesystem is mounted over SSHFS, as host or '
+                 'user@host, e.g. my-board. Required for --method sysroot'
+        )
+        sysroot_group.add_argument(
+            '--sysroot-mount',
+            metavar='DIR',
+            default=None,
+            help="Local mount point for the board's root filesystem "
+                 f"(default: {DEFAULTS['sysroot_mount']})"
+        )
+        sysroot_group.add_argument(
+            '--no-mount',
+            action='store_true',
+            default=None,
+            help='Use a sysroot already mounted at --sysroot-mount instead of '
+                 'mounting it'
+        )
+
+        deps_group = parser.add_argument_group('Dependency options')
+        deps_group.add_argument(
+            '--install-deps',
+            action='store_true',
+            default=None,
+            help='Run rosdep install for the workspace before building. '
+                 '--method docker: installs into a new local image, '
+                 '<tag>-synced-YYYYMMDD, and not on the board. '
+                 '--method sysroot: installs on the board (--sysroot-host) over '
+                 'SSH. --method sdk: ignored, as the SDK sysroot is fixed when '
+                 'the SDK is built. To install on the board and match the image '
+                 'to it, use --install-deps-on-device, then --sync-from-device'
+        )
+        deps_group.add_argument(
+            '--rosdep-args',
+            metavar='ARGS',
+            default=None,
+            help='Arguments for rosdep install, used by --install-deps and '
+                 '--install-deps-on-device. Pass them as one word, e.g. '
+                 '--rosdep-args="--ignore-src -y -r" '
+                 f"(default: {DEFAULTS['rosdep_args']})"
+        )
         deps_group.add_argument(
             '--install-deps-on-device',
             metavar='SSH_TARGET',
-            help='Install workspace dependencies on target device via SSH (e.g., ubuntu@10.42.0.3). Recommended before --sync-from-device.'
+            help='Copy src/ to the board, run rosdep install there over SSH, '
+                 'and exit without building. sudo on the board may ask for a '
+                 'password. Works with any --method. E.g. ubuntu@10.42.0.3'
         )
 
-        # Deployment
-        deploy_group = parser.add_argument_group('Deployment Options')
+        deploy_group = parser.add_argument_group('Deployment options')
         deploy_group.add_argument(
             '--deploy',
             action='store_true',
             default=None,
-            help='Deploy build results to target board after successful build'
+            help='After a successful build, copy the install directory to '
+                 '--deploy-target with rsync --delete, which removes files '
+                 'there that are not in the local install directory'
         )
         deploy_group.add_argument(
             '--deploy-target',
-            help='Deployment target in format user@host:/path/to/install (e.g., ubuntu@10.42.0.3:~/ros2_ws/install/)'
+            metavar='TARGET',
+            help='rsync destination for --deploy, as user@host:path, e.g. '
+                 'ubuntu@10.42.0.3:~/ros2_ws/install/'
         )
 
         # Pass-through colcon args
         parser.add_argument(
             'colcon_args',
             nargs='*',
-            help='Additional arguments to pass to colcon build (e.g., --packages-select my_package)'
+            help='Further arguments for colcon build, e.g. --packages-select '
+                 'my_package'
         )
 
     def main(self, *, context):
@@ -282,7 +375,7 @@ class BuildxVerb(VerbExtensionPoint):
                 # Yocto / OpenEmbedded SDK installed on this host
                 if not args.sdk_env:
                     logger.error("❌ --sdk-env is required for sdk method")
-                    logger.info("💡 Example: --sdk-env /opt/ros-sdk/environment-setup-cortexa72-cortexa53-poky-linux")
+                    logger.info("💡 Example: --sdk-env /opt/ros-sdk/environment-setup-cortexa72-cortexa53-oe-linux")
                     return 1
 
                 from colcon_buildx.sdk import SdkBuilder
