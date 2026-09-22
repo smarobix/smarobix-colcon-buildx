@@ -44,3 +44,5 @@ Getting your code running on a board takes two steps, and colcon-buildx does onl
 - Reference: [command line](reference/cli.md), [config keys](reference/config-keys.md), [image labels](reference/labels.md).
 
 To choose an image for your board, see the images repository's [target reference](https://smarobix.github.io/smarobix-buildx-images/reference/targets/) and the boards they have been [tested on](https://smarobix.github.io/smarobix-buildx-images/reference/tested-hardware/).
+
+Nothing in colcon-buildx is tied to those boards. It works with any image that has ROS 2 under `/opt/ros/<distro>` and a working colcon, so an arm64 image suits an NVIDIA Jetson or another Cortex-A53/A72/A76 board, and an armhf image suits a Cortex-A7 or A9 board running an ARMv7 user space. What has actually been tested is on the page above.
