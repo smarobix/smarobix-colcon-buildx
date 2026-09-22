@@ -191,7 +191,8 @@ class DockerBuilder:
             synced_tag = sync_packages_from_device(
                 self.base_image,
                 ssh_target,
-                manifest_path
+                manifest_path,
+                platform=self.platform
             )
             return synced_tag
         except Exception as e:

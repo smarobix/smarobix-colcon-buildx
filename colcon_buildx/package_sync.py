@@ -18,6 +18,17 @@ from typing import Dict, Tuple, Set
 from pathlib import Path
 
 
+def _platform_args(platform):
+    """
+    Return the docker run --platform option for *platform*.
+
+    The image has to run as the target, whatever its architecture: armhf
+    boards need linux/arm/v7, not the linux/arm64 this used to hard-code.
+    With no platform, Docker picks the variant itself.
+    """
+    return ['--platform', platform] if platform else []
+
+
 class PackageInfo:
     """Represents a package with its version information."""
 
@@ -78,12 +89,13 @@ def extract_device_packages(ssh_target: str) -> Dict[str, PackageInfo]:
     return packages
 
 
-def extract_image_packages(image: str) -> Dict[str, PackageInfo]:
+def extract_image_packages(image: str, platform: str = None) -> Dict[str, PackageInfo]:
     """
     Extract installed packages from Docker image.
 
     Args:
         image: Docker image name/tag
+        platform: Docker platform to run the image as (e.g., linux/arm/v7)
 
     Returns:
         Dictionary mapping package names to PackageInfo objects
@@ -94,7 +106,7 @@ def extract_image_packages(image: str) -> Dict[str, PackageInfo]:
     print(f"📦 Extracting package list from image {image}...")
 
     cmd = [
-        'docker', 'run', '--rm', '--platform', 'linux/arm64',
+        'docker', 'run', '--rm', *_platform_args(platform),
         image,
         'dpkg-query', '-W', '-f=${Package}\t${Version}\t${Architecture}\n'
     ]
@@ -467,7 +479,8 @@ def generate_synced_tag(base_image: str) -> str:
 def sync_packages_from_device(
     base_image: str,
     ssh_target: str,
-    manifest_path: Path
+    manifest_path: Path,
+    platform: str = None
 ) -> str:
     """
     Main function to sync packages from device to Docker image.
@@ -476,6 +489,7 @@ def sync_packages_from_device(
         base_image: Base Docker image to sync
         ssh_target: SSH target for device connection
         manifest_path: Path to save manifest
+        platform: Docker platform to run the image as (e.g., linux/arm/v7)
 
     Returns:
         New synced image tag
@@ -489,7 +503,7 @@ def sync_packages_from_device(
 
     # Extract package lists
     device_pkgs = extract_device_packages(ssh_target)
-    image_pkgs = extract_image_packages(base_image)
+    image_pkgs = extract_image_packages(base_image, platform)
 
     # Compare packages
     version_diffs, device_only, image_only = compare_packages(device_pkgs, image_pkgs)
@@ -567,7 +581,7 @@ def sync_packages_from_device(
             [
                 'docker', 'run',
                 '--name', container_name,
-                '--platform', 'linux/arm64',
+                *_platform_args(platform),
                 base_image,
                 'bash', '-c', sync_script
             ],
