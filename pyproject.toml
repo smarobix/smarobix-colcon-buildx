@@ -65,6 +65,11 @@ Issues = "https://github.com/smarobix/smarobix-colcon-buildx/issues"
 [project.entry-points."colcon_core.verb"]
 buildx = "colcon_buildx.verb.buildx:BuildxVerb"
 
+# pytest and flake8 run from the repository root with no arguments, in CI and
+# by hand; flake8 reads .flake8, which cannot live here.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.packages.find]
 include = ["colcon_buildx*"]
 

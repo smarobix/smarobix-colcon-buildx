@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2025-2026 SMAROBIX GmbH
+# SPDX-License-Identifier: Apache-2.0
+
+[flake8]
+# Long enough for the docker command lists and the shell scripts embedded in
+# package_sync, which read worse when wrapped. Everything else stays shorter.
+max-line-length = 120
+exclude = .git,__pycache__,build,dist,*.egg-info
