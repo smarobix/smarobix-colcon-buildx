@@ -1,18 +1,33 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+# 61 is the first setuptools release that reads [project] metadata (PEP 621).
+requires = ["setuptools>=61", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "colcon-buildx"
 dynamic = ["version"]
-description = "Colcon extension for cross-compilation to embedded ARM64 boards"
+description = "A colcon verb that cross-builds ROS 2 workspaces for arm64 and armhf boards, inside a Docker image or against a Yocto/OE SDK"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "Apache License 2.0"}
 authors = [
-    {name = "Smarobix", email = "info@smarobox.de"}
+    {name = "SMAROBIX GmbH"},
 ]
-keywords = ["colcon", "cross-compilation", "ros2", "embedded", "docker", "arm64"]
+maintainers = [
+    {name = "Sergio Pertuz", email = "sergio@smarobix.com"},
+]
+keywords = [
+    "colcon",
+    "ros2",
+    "cross-compilation",
+    "embedded",
+    "arm64",
+    "armhf",
+    "docker",
+    "yocto",
+    "openembedded",
+    "sdk",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Plugins",
@@ -40,6 +55,13 @@ test = [
 Homepage = "https://github.com/smarobix/smarobix-colcon-buildx"
 Repository = "https://github.com/smarobix/smarobix-colcon-buildx"
 Issues = "https://github.com/smarobix/smarobix-colcon-buildx/issues"
+
+# colcon discovers the verb through this group and name; keep both stable.
+[project.entry-points."colcon_core.verb"]
+buildx = "colcon_buildx.verb.buildx:BuildxVerb"
+
+[tool.setuptools.packages.find]
+include = ["colcon_buildx*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "colcon_buildx.__version__"}
