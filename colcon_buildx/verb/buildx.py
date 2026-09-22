@@ -310,6 +310,7 @@ class BuildxVerb(VerbExtensionPoint):
                     build_base=args.build_base,
                     install_base=args.install_base,
                     use_base_image=args.use_base_image,
+                    toolchain=args.toolchain,
                     workspace_root=workspace_root
                 )
 

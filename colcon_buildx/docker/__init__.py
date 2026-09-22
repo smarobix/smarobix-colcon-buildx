@@ -51,7 +51,7 @@ class DockerBuilder:
     """Handles cross-compilation using Docker containers."""
 
     def __init__(self, image, platform, build_base, install_base, use_base_image=False,
-                 workspace_root=None):
+                 toolchain=None, workspace_root=None):
         """
         Initialize Docker builder.
 
@@ -61,12 +61,15 @@ class DockerBuilder:
             build_base: Build directory
             install_base: Install directory
             use_base_image: Force use of base image, skip synced image detection
+            toolchain: For a cross SDK image, a CMake toolchain file (as seen
+                inside the container) to use instead of the SDK's own
             workspace_root: Workspace root; found from the current directory by default
         """
         self.base_image = image
         self.platform = platform
         self.build_base = build_base
         self.install_base = install_base
+        self.toolchain = toolchain
         self.workspace_root = resolve_workspace_root(workspace_root)
         self.container_name = 'colcon-buildx-builder'
         self.use_base_image = use_base_image
@@ -318,6 +321,11 @@ class DockerBuilder:
         ros_distro = self.detect_ros_distro()
         logger.info(f"✓ Using ROS {ros_distro}")
 
+        if self.toolchain:
+            logger.warning(
+                f"⚠ Ignoring --toolchain: {self.image} runs as the target and builds "
+                "natively. Only a cross SDK image uses a toolchain file.")
+
         script = (
             f'source /opt/ros/{ros_distro}/setup.bash && '
             # Logs go into the mounted build base: under --user the container
@@ -343,16 +351,31 @@ class DockerBuilder:
 
     def _oe_sdk_command(self, build_dir, install_dir, extra_args):
         """docker run for a cross SDK image, which runs on the host architecture."""
-        from colcon_buildx.toolchain import WRAPPER_NAME, write_wrapper
+        from colcon_buildx.toolchain import ENV_TOOLCHAIN, WRAPPER_NAME, write_wrapper
 
         sources = ' && '.join(f'. {shlex.quote(p)}' for p in self.env_setup)
 
         # The wrapper refers to $ENV{OE_CMAKE_TOOLCHAIN_FILE} rather than a path,
         # so it can be written here on the host into the bind-mounted build base
         # even though that variable only exists once the SDK is sourced in the
-        # container.
-        write_wrapper(build_dir / WRAPPER_NAME, SDK_INSTALL_DIR)
+        # container. --toolchain replaces it with a path inside the container.
+        write_wrapper(build_dir / WRAPPER_NAME, SDK_INSTALL_DIR, self.toolchain or ENV_TOOLCHAIN)
         wrapper = f'{SDK_BUILD_DIR}/{WRAPPER_NAME}'
+
+        # Without ros-sdk-env there is no toolchain file to wrap, unless the
+        # user named one.
+        if self.toolchain:
+            toolchain_check = ''
+        else:
+            toolchain_check = (
+                'if [ -z "$OE_CMAKE_TOOLCHAIN_FILE" ]; then '
+                '  echo "OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment:'
+                ' the SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in'
+                ' meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK'
+                ' when building the SDK" >&2; '
+                '  exit 1; '
+                'fi && '
+            )
 
         # CMAKE_TOOLCHAIN_FILE is passed through the environment rather than as
         # --cmake-args: colcon's --cmake-args would collide with a user-supplied
@@ -361,13 +384,7 @@ class DockerBuilder:
             'set -e && '
             f'{sources} && '
             f'export ROS_WORKSPACE={SDK_WORKSPACE} && '
-            'if [ -z "$OE_CMAKE_TOOLCHAIN_FILE" ]; then '
-            '  echo "OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment:'
-            ' the SDK does not include ros-sdk-env (ros/meta-ros@1be4737). Nothing in'
-            ' meta-ros pulls it in; add nativesdk-ros-sdk-env to TOOLCHAIN_HOST_TASK'
-            ' when building the SDK" >&2; '
-            '  exit 1; '
-            'fi && '
+            f'{toolchain_check}'
             f'export CMAKE_TOOLCHAIN_FILE={wrapper} && '
             # Meta-ros SDKs ship ninja but not make. Use Ninja when the sourced
             # environment has it and the user has not chosen a generator; an SDK
