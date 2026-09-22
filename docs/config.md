@@ -21,9 +21,17 @@ colcon-buildx reads at most one config file per run, in one of two formats with 
 
 With `--config PATH`, colcon-buildx reads that file. The format follows the extension: `.yml` and `.yaml` are read as YAML, anything else as `key = value`. If the file doesn't exist, it prints `Specified config file not found: PATH` and carries on with no config file.
 
-Without `--config`, it starts in the current directory and looks for `.buildx.conf`, `.buildx.yml` and `.buildx.yaml`, in that order. If none is there, it moves up to the parent directory and tries again. It stops at the workspace root, the directory that contains `src/`, and goes at most four levels up. The first file it finds is the only one it reads; files are never merged.
+Without `--config`, it starts in the current directory and looks for `.buildx.conf`, `.buildx.yml` and `.buildx.yaml`, in that order. If none is there, it moves up to the parent directory and tries again. It stops at the workspace root, the directory that contains `src/`, and looks at five directories in all, the current one included. The first file it finds is the only one it reads; files are never merged.
 
-If a file can't be parsed, colcon-buildx prints `Failed to load config from FILE: ERROR` and carries on without it.
+A run prints the file it read, so you can tell which one it was:
+
+```text
+Config file: /home/you/ros2_ws/.buildx.conf
+```
+
+If a file can't be parsed, colcon-buildx prints `Failed to load config from FILE: ERROR` and carries on without it. The same happens to a YAML file whose top level isn't `key: value` pairs.
+
+`colcon buildx --help` ends with the same search order and precedence rules.
 
 ## The `.conf` format
 
@@ -56,26 +64,37 @@ Booleans are YAML booleans (`true`, `false`). Hyphenated keys work here too.
 
 A key is the name of the command-line option without the leading `--`, with underscores for hyphens: `--docker-image` becomes `docker_image`. The [config keys reference](reference/config-keys.md) lists every key with its default and its flag.
 
-Two things on the command line have no key:
+Some things on the command line have no key:
 
 - `--config` itself;
+- `--sync-from-device` and `--install-deps-on-device`, which are one-off actions rather than settings, see below;
 - the arguments passed through to `colcon build`, such as `--packages-select`. There is no `colcon_args` key; put colcon arguments on the command line.
 
 A key colcon-buildx doesn't know is ignored with a warning, `Ignoring unrecognised config key: KEY`. The run carries on, so check for the warning after editing the file. A misspelt `docker_platform` would otherwise build silently for the default architecture.
 
 A `method` other than `docker`, `sdk` or `sysroot` stops the run with `Unknown method`.
 
-Complete examples that set every key, with a comment on each, are in the repository: [`examples/buildx.conf`](https://github.com/smarobix/smarobix-colcon-buildx/blob/main/examples/buildx.conf) and [`examples/buildx.yml`](https://github.com/smarobix/smarobix-colcon-buildx/blob/main/examples/buildx.yml). Copy one to your workspace root as `.buildx.conf` or `.buildx.yml` and delete what you don't need.
+Commented examples covering every key are in the repository: [`examples/buildx.conf`](https://github.com/smarobix/smarobix-colcon-buildx/blob/main/examples/buildx.conf) and [`examples/buildx.yml`](https://github.com/smarobix/smarobix-colcon-buildx/blob/main/examples/buildx.yml). Copy one to your workspace root as `.buildx.conf` or `.buildx.yml` and delete what you don't need.
+
+## Actions are not settings
+
+`--sync-from-device` and `--install-deps-on-device` each do one thing to a board and then exit without building. They are command-line flags only, because in a config file they would turn every build in that workspace into a device operation. A file that sets one gets a warning naming the flag, and the build goes ahead as usual:
+
+```text
+sync_from_device is a command-line action, not a config key; ignoring it.
+Run `colcon buildx --sync-from-device <user@host>` instead.
+```
+
+See [Sync and deploy](sync-and-deploy.md).
 
 ## Keys that change what every run does
 
-A config file applies to every run, so some keys are better left on the command line.
+A config file applies to every run, so two keys deserve a second look.
 
-- **`sync_from_device` and `install_deps_on_device`.** With either one set in a config file, every `colcon buildx` run does only that step and exits without building. Pass `--sync-from-device` and `--install-deps-on-device` on the command line when you need them. See [Sync and deploy](sync-and-deploy.md).
 - **`deploy = true`.** Every successful build is followed by `rsync --delete` to `deploy_target`, which removes anything else in that directory on the board. See [Deploy](sync-and-deploy.md#deploy).
 - **`install_deps = true`.** With the Docker method, every build first runs `rosdep install` and commits a new image.
 
-Boolean options have no "off" switch on the command line. If the config file sets `deploy = true`, a run without deploying needs another config file, given with `--config`.
+An on/off option can only be switched on from the command line. If the config file sets `deploy = true`, turn it off by editing the file, or point `--config` at another one.
 
 ## Several boards in one workspace
 

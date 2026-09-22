@@ -17,18 +17,20 @@ The editable install registers the `buildx` verb with colcon, so `colcon buildx 
 ## Running the tests
 
 ```bash
-python -m pytest
-python -m flake8 colcon_buildx tests tools
+pytest -q
+flake8
 ```
 
-CI runs the same checks on every pull request; [`test.yml`](https://github.com/smarobix/smarobix-colcon-buildx/blob/main/.github/workflows/test.yml) has the exact commands. The tests don't need Docker, an SDK or a board. They don't need colcon either: `tests/conftest.py` stands in for the few colcon names the extension imports when `colcon-core` isn't installed.
+`flake8` reads its settings from [`.flake8`](https://github.com/smarobix/smarobix-colcon-buildx/blob/main/.flake8), so it needs no arguments. CI runs both on every pull request, on the oldest and the newest Python the package is tested with; [`test.yml`](https://github.com/smarobix/smarobix-colcon-buildx/blob/main/.github/workflows/test.yml) has the matrix. The tests don't need Docker, an SDK or a board. They don't need colcon either: `tests/conftest.py` stands in for the few colcon names the extension imports when `colcon-core` isn't installed.
 
 ## Code layout
 
 | Path | What it holds |
 |---|---|
-| `colcon_buildx/verb/buildx.py` | The `buildx` verb: its command-line options, `DEFAULTS`, `CONFIG_KEYS`, and the dispatch to a backend. |
+| `colcon_buildx/__init__.py` | The version, and the ROS 2 distros the extension knows about. |
+| `colcon_buildx/verb/buildx.py` | The `buildx` verb: its command-line options, `DEFAULTS`, `CONFIG_KEYS`, `ACTION_FLAGS`, the `--help` epilog, and the dispatch to a backend. |
 | `colcon_buildx/config/` | Finding and reading config files, and merging them with the command line and the defaults. |
+| `colcon_buildx/workspace.py` | Finding the workspace root, which the config search and every backend share. |
 | `colcon_buildx/docker/` | The Docker backend, the image label names, and synced-image detection. |
 | `colcon_buildx/sdk/` | The `sdk` backend and `--emit-mixin`. |
 | `colcon_buildx/sysroot/` | The experimental SSHFS `sysroot` backend. |
@@ -41,12 +43,12 @@ CI runs the same checks on every pull request; [`test.yml`](https://github.com/s
 | `tools/gen_docs.py` | Generates the command-line and config-key reference pages. |
 | `tools/check_links.py` | Checks the relative links in `README.md` and `docs/`. |
 
-Every option is declared with `default=None`, and its real default lives in `DEFAULTS`. That keeps "not given on the command line" apart from "given with the default value", which is what lets a config file fill in any option. `CONFIG_KEYS` is every key a config file may set; anything else is reported as unrecognised.
+Every option is declared with `default=None`, and its real default lives in `DEFAULTS`. That keeps "not given on the command line" apart from "given with the default value", which is what lets a config file fill in any option. `CONFIG_KEYS` is every key a config file may set; anything else is reported as unrecognised. `ACTION_FLAGS` holds the one-off device actions, which are flags only, so a config file that names one gets a warning that points at the flag.
 
 ## Adding an option
 
 1. Add the flag in `BuildxVerb.add_arguments`, with `default=None`.
-2. If it has a default, add it to `DEFAULTS`. Otherwise add its name to `CONFIG_KEYS`, unless it mustn't be settable from a file.
+2. If it has a default, add it to `DEFAULTS`. If a config file may set it but it has no default, add its name to `CONFIG_KEYS`. If it is a one-off action that replaces the build, add it to `ACTION_FLAGS` instead of `CONFIG_KEYS`.
 3. Add it to both files in `examples/`, with a comment.
 4. Regenerate the reference pages, as below.
 

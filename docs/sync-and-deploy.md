@@ -26,7 +26,7 @@ colcon buildx --sync-from-device ubuntu@10.42.0.3
 colcon buildx
 ```
 
-Steps 2 and 3 each do only that one thing and then exit, without building. For that reason, don't set `install_deps_on_device` or `sync_from_device` in a config file: every run would then do the step and skip the build.
+Steps 2 and 3 each do only that one thing and then exit, without building. They are command-line actions rather than settings, so a config file can't hold them: one that sets `sync_from_device` or `install_deps_on_device` gets a warning naming the flag, and the build goes ahead. See [Configuration](config.md#actions-are-not-settings).
 
 ## Installing dependencies on the board
 
@@ -42,7 +42,7 @@ It runs interactively, so `sudo` can ask for a password. The board needs `rosdep
 
 ## Syncing the image from the board
 
-`--sync-from-device SSH_TARGET` works with the Docker method only. It:
+`--sync-from-device SSH_TARGET` works with the Docker method only, and not with a cross SDK image: an SDK image runs on the host, so its Debian packages aren't the board's, and its target libraries come from the SDK's sysroot, which is fixed when the SDK is built. With one, colcon-buildx says so and stops. With any other image it:
 
 1. lists the packages installed on the board with `dpkg-query`, and the packages in the configured image;
 2. for each package in both whose version differs, installs the board's version in a container of the image, downgrading if needed;
@@ -61,11 +61,11 @@ Add both to your workspace's `.gitignore`.
 
 ### Which image a build uses
 
-Every Docker build looks for local images whose tag is `<tag>-synced-<YYYYMMDD>`, for the tag you configured, and uses the newest. For `k26-jazzy`, that is the newest `k26-jazzy-synced-` image. The build prints `Using synced image:` with its name, or `Using base image:` when there is none.
+Every Docker build looks for a local image in the same repository as `docker_image` whose tag is `<tag>-synced-<YYYYMMDD>`, and uses the newest. For `k26-jazzy`, that is the newest `k26-jazzy-synced-` image from the same repository; the same tag in a mirror is a different image and is left alone. The build prints `Using synced image:` with its name and the date it was synced, or `Using base image:` when there is none.
 
 To build with the tag as published, pass `--use-base-image` or set `use_base_image = true`. To go back to the published tag for good, delete the synced images with `docker rmi`.
 
-`--install-deps` with the Docker method also commits a `<tag>-synced-<YYYYMMDD>` image and updates the manifest, so later builds pick that image up the same way. Its packages are installed only in the image, not on the board.
+`--install-deps` with the Docker method also commits a `<tag>-synced-<YYYYMMDD>` image and updates the manifest, so later builds pick that image up the same way. Its packages are installed only in the image, not on the board. With a cross SDK image it is ignored with a warning, for the same reason as `--sync-from-device`.
 
 ## Deploy
 
@@ -84,7 +84,7 @@ rsync -avz --delete cross_install/ ubuntu@10.42.0.3:~/ros2_ws/install/
 
 **`--delete` removes every file in the target directory that isn't in `cross_install/`.** Point `deploy_target` at a directory that holds only this workspace's install tree, never at a home directory, `/opt/ros` or anything else you want to keep. colcon-buildx adds a trailing `/` to the target, so rsync copies the contents of `cross_install/` into it.
 
-Both the host and the board need `rsync`, and the host needs SSH access to the board. Run it from the workspace root. If `deploy = true` is in the config file, every successful build deploys.
+`install_base` is taken relative to the workspace root, wherever in the workspace you run the command from. Both the host and the board need `rsync`, and the host needs SSH access to the board. A missing `--deploy-target` is reported before the build starts, not after it. If `deploy = true` is in the config file, every successful build deploys.
 
 On the board, source ROS first and then the workspace. The install tree is a merged one, so its setup scripts are at the top:
 

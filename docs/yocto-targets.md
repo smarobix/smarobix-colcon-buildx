@@ -52,7 +52,7 @@ Both SDK routes, the SDK image and `--method sdk`, need an SDK built with **`ros
 TOOLCHAIN_HOST_TASK:append = " nativesdk-ros-sdk-env"
 ```
 
-Without it, colcon-buildx stops with an error that says so. The published SDKs and SDK images include it. `--method sdk` also accepts `--toolchain` to name the toolchain file directly.
+Without it, colcon-buildx stops with an error that says so. The published SDKs and SDK images include it. An SDK without it can still be used by naming its toolchain file with `--toolchain`, both with `--method sdk` and with an SDK image, where the path is the one inside the container.
 
 meta-ros SDKs don't include `rosidl_generator_py`, so interface packages get C and C++ code only with either SDK route.
 

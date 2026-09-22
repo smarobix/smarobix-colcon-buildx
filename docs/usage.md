@@ -20,7 +20,7 @@ cd ~/ros2_ws
 colcon buildx
 ```
 
-colcon-buildx pulls the image if it isn't local yet, and runs `colcon build` inside it with your `src/` mounted read-only.
+colcon-buildx prints the config file it read and the image it is using, pulls the image if it isn't local yet, and runs `colcon build` inside it with your `src/` mounted read-only.
 
 The results go to `cross_build/` and `cross_install/`. They are kept apart from a native `build/` and `install/`, so a host build and a cross build in the same workspace don't overwrite each other. colcon's logs go to `cross_build/log/`. The container runs as your user, so you own everything it writes and can delete it without sudo.
 
@@ -77,13 +77,21 @@ Every option can also be set in a config file; see [Configuration](config.md). T
 
 ## The workspace root
 
-colcon-buildx looks for the workspace root, the directory with `src/` in it, starting at the current directory and moving up through its parents, at most four levels. The build, install and log directories are created there, and only its `src/` is mounted into the container.
+colcon-buildx looks for the workspace root, the directory with `src/` in it, starting at the current directory and moving up through its parents; it looks at five directories in all, the current one included. The build and install directories are created there, whichever directory you started the command in, and only its `src/` is mounted into the container.
 
-If it finds no `src/`, it prints a warning and uses the current directory as the workspace root. Run `colcon buildx` from the workspace root, or from a directory below it, to avoid that.
+If it finds no `src/`, it warns and uses the current directory as the workspace root:
+
+```text
+No workspace root found: no src/ directory in /home/you/tmp or the 4
+directories above it. Using the current directory as the workspace root;
+run colcon buildx from your workspace root instead.
+```
+
+The config file search walks the same directories, so both stop in the same place.
 
 ## The ROS 2 distro
 
-In an image that runs as the target, colcon-buildx sources `/opt/ros/<distro>/setup.bash` before building. It takes the distro from the image's `org.smarobix.buildx.ros-distro` label. Without the label, it looks for a known distro name (`humble`, `jazzy`, `kilted` or `rolling`) in the image name, and if there is none it assumes `jazzy` and prints a warning. The published images have the distro in their tag, so this works for them without the label.
+In an image that runs as the target, colcon-buildx sources `/opt/ros/<distro>/setup.bash` before building. It takes the distro from the image's `org.smarobix.buildx.ros-distro` label. Without the label, it looks for a known distro name in the image name, taking the first of `jazzy`, `humble`, `kilted` and `rolling` that appears; if there is none, it assumes `jazzy` and prints a warning. The published images have the distro in their tag, so this works for them without the label.
 
 ## Installing workspace dependencies
 
@@ -91,9 +99,9 @@ In an image that runs as the target, colcon-buildx sources `/opt/ros/<distro>/se
 
 | Method | `--install-deps` installs into |
 |---|---|
-| `docker` | A copy of the image, which colcon-buildx commits as `<tag>-synced-<YYYYMMDD>` (the suffix is today's date) and uses for later builds. The board doesn't get these packages. |
+| `docker` | A copy of the image, which colcon-buildx commits as `<tag>-synced-<YYYYMMDD>` (the suffix is today's date) and uses for later builds. The board doesn't get these packages. With a cross SDK image it is ignored with a warning. |
 | `sysroot` | The board, over SSH, as `--install-deps-on-device` does. |
-| `sdk` | Nothing; it is ignored. An SDK's sysroot is fixed when the SDK is built. |
+| `sdk` | Nothing; it is ignored with a warning. An SDK's sysroot is fixed when the SDK is built, so add the dependencies to the Yocto image and rebuild the SDK. |
 
 With the Docker method, a dependency installed only in the image leaves you with a binary the board can't run. Install dependencies on the board first and then sync the image from it; [Sync and deploy](sync-and-deploy.md) describes that workflow.
 

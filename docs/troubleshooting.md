@@ -20,13 +20,13 @@ The config file couldn't be parsed, usually a YAML syntax error. The run carries
 
 `method` in the config file is not `docker`, `sdk` or `sysroot`.
 
-### A warning that no workspace root was found
+### `No workspace root found: no src/ directory in DIR or the 4 directories above it`
 
-colcon-buildx found no directory with `src/` in it, from the current directory up to four levels above it. It uses the current directory as the workspace root instead, so the build finds no packages or writes its output in the wrong place. Run `colcon buildx` from the workspace root.
+colcon-buildx uses the current directory as the workspace root instead, so the build finds no packages, or writes its output somewhere you don't expect. Run `colcon buildx` from the workspace root, the directory that holds `src/`.
 
-### Every run syncs or installs dependencies and never builds
+### `sync_from_device is a command-line action, not a config key; ignoring it`
 
-`sync_from_device` or `install_deps_on_device` is set in the config file. Both make a run do only that step. Remove them from the file and pass `--sync-from-device` or `--install-deps-on-device` when you need them; see [Sync and deploy](sync-and-deploy.md).
+`sync_from_device` or `install_deps_on_device` is set in a config file. Both are one-off actions rather than settings, so the build carries on without them. Run `colcon buildx --sync-from-device ubuntu@10.42.0.3` or `colcon buildx --install-deps-on-device ubuntu@10.42.0.3` instead; see [Sync and deploy](sync-and-deploy.md).
 
 ## Docker
 
@@ -70,7 +70,15 @@ The SDK image is missing the label that names its environment script, and the bu
 
 ### A synced image isn't picked up
 
-List the synced images with `docker images | grep synced`. A build uses the newest local image tagged `<tag>-synced-<YYYYMMDD>`, for exactly the tag you configured, unless `--use-base-image` or `use_base_image = true` is set. If you changed `docker_image`, run `--sync-from-device` again.
+List the synced images with `docker images | grep synced`. A build uses the newest local image tagged `<tag>-synced-<YYYYMMDD>`, for exactly the tag you configured and in the same repository, unless `--use-base-image` or `use_base_image = true` is set. If you changed `docker_image`, run `--sync-from-device` again.
+
+### `IMAGE is a cross SDK image: ... cannot be synced to a board`
+
+`--sync-from-device` compares the board's Debian packages with the image's, which only makes sense for an image that runs as the target. An SDK image runs on the host, and the target's libraries come from the SDK's sysroot, which is fixed when the SDK is built. `--install-deps` is ignored for the same reason, with a warning.
+
+### `Ignoring --toolchain: IMAGE runs as the target and builds natively`
+
+A toolchain file is for a cross build. Only `--method sdk`, or `--method docker` with a cross SDK image, uses one; with an image that runs as the target, drop the option.
 
 ### A build still uses an old synced image
 
@@ -78,7 +86,7 @@ Pass `--use-base-image` for one build, or delete the synced images with `docker 
 
 ### `rosdep` fails during `--install-deps`
 
-colcon-buildx runs `rosdep init` itself when rosdep has no sources yet, and then `rosdep update`, in a container of the image, before `rosdep install`. If one of these fails:
+colcon-buildx runs `rosdep init` itself when rosdep has no sources yet, then `rosdep update` and `apt-get update`, in a container of the image, before `rosdep install`. If one of these fails:
 
 - `rosdep: command not found`: the image has no rosdep. Install `python3-rosdep` in your image, or use one that has it.
 - `rosdep update` errors: the container has no network access to GitHub, where the rosdep sources live.
@@ -94,7 +102,7 @@ An image for another architecture runs under QEMU, where every compiler process 
 
 ### `OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment`
 
-With `--method sdk` the message reads `OE_CMAKE_TOOLCHAIN_FILE is unset after sourcing the SDK environment`. Either way, the SDK was built without `ros-sdk-env`. Add `nativesdk-ros-sdk-env` to `TOOLCHAIN_HOST_TASK` and rebuild it; see [Yocto targets](yocto-targets.md#what-the-sdk-has-to-contain). With `--method sdk`, `--toolchain` names the toolchain file directly instead.
+With `--method sdk` the message reads `OE_CMAKE_TOOLCHAIN_FILE is unset after sourcing the SDK environment`. Either way, the SDK was built without `ros-sdk-env`. Add `nativesdk-ros-sdk-env` to `TOOLCHAIN_HOST_TASK` and rebuild it; see [Yocto targets](yocto-targets.md#what-the-sdk-has-to-contain). Or name a toolchain file directly with `--toolchain`, which works with `--method sdk` and with a cross SDK image; for an image, give the path inside the container.
 
 ### `--method sdk requires a Linux host`
 
@@ -134,11 +142,11 @@ colcon-buildx mounts with `-o allow_other`, which FUSE allows for a user other t
 
 ### `--deploy-target is required when --deploy is used`
 
-Set `deploy_target` in the config file, or pass `--deploy-target`, for example `ubuntu@10.42.0.3:~/ros2_ws/install/`.
+Set `deploy_target` in the config file, or pass `--deploy-target`, for example `ubuntu@10.42.0.3:~/ros2_ws/install/`. colcon-buildx checks this before it starts the build, so nothing is lost.
 
-### `Install directory not found`
+### `Install directory not found: PATH`
 
-There is nothing to deploy yet, or colcon-buildx looked for the install directory in the wrong place. Run `colcon buildx --deploy` from the workspace root, after a successful build.
+There is nothing at `install_base` under the workspace root to deploy. Build first, and check `install_base` if you changed it.
 
 ### Files on the board disappeared after a deploy
 
