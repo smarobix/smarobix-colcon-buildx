@@ -139,7 +139,7 @@ the current one that holds `src/`. Add the ones you use to `.gitignore`.
 
 | Path | Written by |
 |---|---|
-| `cross_build/` | Every build: colcon's build tree, the toolchain wrapper `buildx-toolchain.cmake`, and with the Docker method colcon's logs. |
+| `cross_build/` | Every build: colcon's build tree, the toolchain wrapper, and with the Docker method colcon's logs. |
 | `cross_install/` | Every build. What `--deploy` copies to the board. |
 | `log/` | Builds with `--method sdk` or `--method sysroot`, which leave colcon's logs in its usual place. |
 | `.buildx-sync-manifest.json` | `--sync-from-device`, and `--install-deps` with the Docker method. |
