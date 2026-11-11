@@ -119,7 +119,7 @@ def _workspace_root():
 
 
 class BuildxVerb(VerbExtensionPoint):
-    """Cross-compile a ROS 2 workspace for arm64 and armhf boards."""
+    """Cross-compile a ROS 2 workspace for OEROS/Yocto images and arm64/armhf boards."""
 
     def __init__(self):
         super().__init__()
@@ -135,10 +135,11 @@ class BuildxVerb(VerbExtensionPoint):
             '--method',
             choices=list(METHODS),
             default=None,
-            help='How to build: docker builds in a container image; sdk builds '
+            help='How to build: docker builds in a container made from an image '
+                 '(an SDK image such as the OEROS ones, or a board image); sdk builds '
                  'against a Yocto/OE SDK installed on this Linux host; sysroot '
                  "builds against the board's root filesystem mounted over SSHFS "
-                 f"(experimental). Default: {DEFAULTS['method']}"
+                 f"(deprecated). Default: {DEFAULTS['method']}"
         )
         parser.add_argument(
             '--config',
@@ -175,20 +176,22 @@ class BuildxVerb(VerbExtensionPoint):
         docker_group.add_argument(
             '--docker-image',
             metavar='IMAGE',
-            help='Image to build in; required for --method docker, e.g. '
-                 'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy. If a local '
-                 '<tag>-synced-YYYYMMDD copy of it exists, made by '
-                 '--sync-from-device or --install-deps, the newest one is used '
+            help='Image to build with; required for --method docker, e.g. '
+                 'ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64. An SDK image '
+                 'runs on this host and is prepared once (a shell, its environment, '
+                 'fixes); a board image of another architecture becomes the sysroot '
+                 'of a cross image built once for this host. Nothing runs under '
+                 'emulation. If a local <tag>-synced-YYYYMMDD copy of it exists, made '
+                 'by --sync-from-device or --install-deps, the newest one is used '
                  'instead'
         )
         docker_group.add_argument(
             '--docker-platform',
             metavar='PLATFORM',
             default=None,
-            help='Docker platform of the target, which the image runs as: '
-                 'linux/arm64, or linux/arm/v7 for armhf boards. Also used by '
-                 '--sync-from-device and --install-deps. Cross SDK images ignore '
-                 'it and run on the host architecture '
+            help='Platform of the target: linux/arm64, or linux/arm/v7 for armhf '
+                 'boards. Picks the variant to pull of a board image published for '
+                 'several platforms. SDK images ignore it '
                  f"(default: {DEFAULTS['docker_platform']})"
         )
         docker_group.add_argument(
@@ -204,7 +207,8 @@ class BuildxVerb(VerbExtensionPoint):
             help="Read the board's installed Debian packages over SSH, install "
                  'the same versions into a copy of --docker-image, tag it '
                  '<tag>-synced-YYYYMMDD, and exit without building. '
-                 'E.g. ubuntu@10.42.0.3. Not for cross SDK images'
+                 'E.g. ubuntu@10.42.0.3. Only for an image of this host\'s '
+                 'architecture, as it runs the image\'s apt; not for SDK images'
         )
 
         sdk_group = parser.add_argument_group('SDK options (--method sdk)')
@@ -225,7 +229,7 @@ class BuildxVerb(VerbExtensionPoint):
         )
 
         sysroot_group = parser.add_argument_group(
-            'SSHFS sysroot options (--method sysroot, experimental)')
+            'SSHFS sysroot options (--method sysroot, deprecated)')
         sysroot_group.add_argument(
             '--sysroot-host',
             metavar='HOST',
@@ -254,7 +258,8 @@ class BuildxVerb(VerbExtensionPoint):
             default=None,
             help='Run rosdep install for the workspace before building. '
                  '--method docker: installs into a new local image, '
-                 '<tag>-synced-YYYYMMDD, and not on the board. '
+                 '<tag>-synced-YYYYMMDD, and not on the board; only for an image '
+                 'of this host\'s architecture. '
                  '--method sysroot: installs on the board (--sysroot-host) over '
                  'SSH. --method sdk: ignored, as the SDK sysroot is fixed when '
                  'the SDK is built. To install on the board and match the image '
@@ -368,6 +373,10 @@ class BuildxVerb(VerbExtensionPoint):
 
             if args.method == 'sysroot':
                 # SSHFS-based cross-compilation
+                logger.warning(
+                    "⚠ --method sysroot is deprecated: a board image used with --method docker "
+                    "is the same idea without SSHFS. A board's own root filesystem works too: "
+                    "tar it, `docker import` it, and pass that image.")
                 if not args.toolchain:
                     logger.error("❌ --toolchain is required for sysroot method")
                     return 1
@@ -419,7 +428,7 @@ class BuildxVerb(VerbExtensionPoint):
                 # Docker-based cross-compilation
                 if not args.docker_image:
                     logger.error("❌ --docker-image is required for docker method")
-                    logger.error("💡 Example: --docker-image ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy")
+                    logger.error("💡 Example: --docker-image ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64")
                     return 1
 
                 from colcon_buildx.docker import DockerBuilder

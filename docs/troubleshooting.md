@@ -20,27 +20,33 @@ Each entry starts with the message you see. colcon-buildx's messages come throug
 
 **`Failed to pull image`.** Check the tag against the [targets reference](https://smarobix.github.io/smarobix-buildx-images/reference/targets/). The published images need no login.
 
-**`no matching manifest for linux/amd64`.** An SDK image on an x86_64 host. colcon-buildx starts SDK images without `--platform`, and the published tags have only an arm64 entry. Pull once with the platform, then build again:
+**`does not run images under emulation`.** The image is for another architecture, and colcon-buildx will not emulate it. The message names the image to use instead: on Apple silicon, `oeros-sdk-target` rather than `oeros-sdk-cross`; for an OEROS robot, the SDK image rather than the robot's own image.
 
-```bash
-docker pull --platform linux/arm64 ghcr.io/smarobix/smarobix-buildx-images:k26-oesdk-jazzy
-```
+**`Building colcon-buildx:prepared-... failed` or `Building colcon-buildx:cross-... failed`.** Preparing an image or building a cross image failed; Docker's output above the message says where. Both need network access the first time: BusyBox from Docker Hub, `ament_cmake_ros` from GitHub, Ubuntu and ROS packages for a cross image.
 
-**`exec format error`.** QEMU is not registered for the image's architecture. Register it with `docker run --rm --privileged multiarch/qemu-user-static --reset -p yes`, and check that `docker_platform` matches the image: `linux/arm64` for arm64 images, `linux/arm/v7` for armhf ones.
+**`colcon buildx builds a cross image from Ubuntu board images only`.** A board image of another architecture is turned into a cross image from the same Ubuntu release. Debian and Raspberry Pi OS images are not supported yet.
+
+**`target pythonX.Y, host pythonX.Z: the host release must match the target's`.** The board image's Python is not the one of its Ubuntu release, so the host side cannot report the target's ABI. Use an image with the release's own Python.
 
 **`Could not determine ROS distro from 'IMAGE', assuming jazzy`.** The image has no `org.smarobix.buildx.ros-distro` label and no distro in its name. Add the [label](labels.md).
 
 **A build uses an old synced image, or ignores a new sync.** A build takes the newest local `<tag>-synced-<date>` image for exactly the configured tag; `docker images | grep synced` lists them. `--use-base-image` builds in the published tag once, `docker rmi` on the synced images goes back for good, and after changing `docker_image` you need to sync again.
 
+**`--install-deps runs the image's own apt`** or **`--sync-from-device runs the image's own apt`.** Installing packages into an image runs its apt, which an image of another architecture can only do under emulation. Run it on a computer of the image's architecture, or add the packages where the image is built.
+
 **`IMAGE is a cross SDK image ... cannot be synced`.** An SDK image runs on the host and takes its target libraries from the SDK's sysroot. Sync and `--install-deps` do not apply to it.
 
 **`rosdep` fails during `--install-deps`.** `rosdep: command not found` means the image has no rosdep. An error from `rosdep update` means the container has no network access to GitHub. `Cannot locate rosdep definition for NAME` means the name in `package.xml` is not in the rosdep database; fix it, or pass `--rosdep-args="--ignore-src -y --skip-keys NAME"`.
 
-**Builds are slow.** `cross_build/` and `cross_install/` are kept between runs, so later builds are incremental; do not delete them. An image for another architecture runs under QEMU, where every compiler process is emulated. An arm64 host builds arm64 images natively.
+**Builds are slow.** `cross_build/` and `cross_install/` are kept between runs, so later builds are incremental; do not delete them. The first build with a new image also prepares the image, or builds its cross image, once.
 
 ## Yocto SDKs
 
-**`OE_CMAKE_TOOLCHAIN_FILE ... unset after sourcing the SDK environment`.** The SDK was built without `ros-sdk-env`. Rebuild it with `nativesdk-ros-sdk-env` in `TOOLCHAIN_HOST_TASK`, or name its toolchain file with `--toolchain`; for an image, give the path inside the container.
+**`OE_CMAKE_TOOLCHAIN_FILE unset after sourcing the SDK environment`.** With `--method sdk`, the SDK was built without `ros-sdk-env`. Rebuild it with `nativesdk-ros-sdk-env` in `TOOLCHAIN_HOST_TASK`, or name its toolchain file with `--toolchain`. SDK images are prepared with a stand-in and do not need it.
+
+**`Could not find a package configuration file provided by "ament_cmake_ros_core"`.** With `--method sdk`, the SDK lacks `ament_cmake_ros_core` (meta-ros Kilted and later, see [OEROS images](oeros.md)). SDK images get it when colcon-buildx prepares them.
+
+**`libatomic.so.1: cannot open shared object file` on the robot.** The program was linked without `--as-needed` and the robot's image has no `libatomic`. colcon-buildx links with `--as-needed` in images it prepares; rebuild with the current version.
 
 **`--method sdk requires a Linux host`.** An OE SDK is a Linux program. On macOS, use an SDK image with the Docker method.
 
@@ -50,7 +56,7 @@ docker pull --platform linux/arm64 ghcr.io/smarobix/smarobix-buildx-images:k26-o
 
 **Tests fail to configure.** Pass `--cmake-args -DBUILD_TESTING=OFF`. A cross build cannot run the lint tests that `ros2 pkg create` adds, and the dev container ships the linters' CMake hooks without the linters.
 
-**`ros2 topic echo` cannot show a message type built with an SDK.** Neither SDK route generates Python message bindings. Build interface packages in the dev container, or check with `ros2 topic info`.
+**`ros2 topic echo` cannot show a message type built with an SDK.** meta-ros SDKs generate no Python message bindings. Put the message package into the image as a recipe, build it with `oeros-sdk-target`, or check with `ros2 topic info`.
 
 ## Deploy
 

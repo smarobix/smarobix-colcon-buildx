@@ -179,7 +179,7 @@ def test_example_sets_a_working_docker_build(parser, name):
     config = load_config(EXAMPLES / name)
     assert config == {
         'method': 'docker',
-        'docker_image': 'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy',
+        'docker_image': 'ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64',
         'docker_platform': 'linux/arm64',
     }
     args = parser.parse_args([])

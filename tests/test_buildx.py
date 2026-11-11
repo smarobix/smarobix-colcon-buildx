@@ -111,6 +111,11 @@ def _builder(image='img:jazzy'):
         image, 'linux/arm64', 'cross_build', 'cross_install', use_base_image=True)
 
 
+def _script(cmd):
+    """The build script of a docker run command; it travels as BUILDX_SCRIPT."""
+    return next(a.split('=', 1)[1] for a in cmd if a.startswith('BUILDX_SCRIPT='))
+
+
 def test_image_without_labels_is_ros_apt(workspace):
     builder = _builder()
     builder._apply_labels({'Config': {'Labels': None}})
@@ -126,15 +131,52 @@ def test_labels_select_oe_sdk_and_distro(workspace):
     assert builder.detect_ros_distro() == 'humble'
 
 
-def test_native_image_runs_as_target_platform(workspace):
+def test_no_image_runs_under_emulation(workspace):
+    # Every image colcon buildx runs is the host's own architecture: an SDK, a
+    # dev container of the host's architecture, or a cross image it built.
+    builder = _builder()
+    (workspace / 'b').mkdir()
+    for command in (builder._native_command, builder._oe_sdk_command, builder._cross_command):
+        assert '--platform' not in command(workspace / 'b', workspace / 'i', [])
+
+
+def test_native_image_sources_its_ros_setup(workspace):
     cmd = _builder()._native_command(workspace / 'b', workspace / 'i', [])
-    assert cmd[cmd.index('--platform') + 1] == 'linux/arm64'
+    assert _script(cmd).startswith('. /opt/ros/jazzy/setup.sh && colcon ')
+
+
+def test_prepared_native_image_sources_its_env_script(workspace):
+    builder = _builder()
+    builder._apply_labels({'Config': {'Labels': {
+        docker.LABEL_KIND: docker.KIND_YOCTO_NATIVE,
+        docker.LABEL_ENV_SETUP: '/opt/buildx/env.sh'}}})
+    script = _script(builder._native_command(workspace / 'b', workspace / 'i', []))
+    assert script.startswith('. /opt/buildx/env.sh && colcon ')
+
+
+def test_scripts_run_in_bash_if_present_else_sh(workspace):
+    cmd = _builder()._native_command(workspace / 'b', workspace / 'i', [])
+    assert cmd[-3:-1] == ['sh', '-c']
+    assert 'command -v bash' in cmd[-1] and 'exec sh -c' in cmd[-1]
+    assert cmd[cmd.index('--entrypoint') + 1] == ''
+
+
+def test_cross_image_builds_with_its_toolchain_and_install_root(workspace):
+    builder = _builder()
+    builder._apply_labels({'Config': {'Labels': {
+        docker.LABEL_KIND: docker.KIND_SYSROOT_CROSS,
+        docker.LABEL_ENV_SETUP: '/opt/buildx/env.sh',
+        docker.LABEL_TOOLCHAIN: '/opt/buildx/toolchain.cmake'}}})
+    script = _script(builder._cross_command(workspace / 'b', workspace / 'i', []))
+    assert script.startswith('set -e && . /opt/buildx/env.sh && ')
+    assert 'export BUILDX_INSTALL_BASE=/workspace/cross_install' in script
+    assert 'export CMAKE_TOOLCHAIN_FILE=/opt/buildx/toolchain.cmake' in script
 
 
 def test_native_command_quotes_passthrough_args(workspace):
     cmd = _builder()._native_command(
         workspace / 'b', workspace / 'i', ['--packages-select', 'my pkg'])
-    assert "'my pkg'" in cmd[-1]
+    assert "'my pkg'" in _script(cmd)
 
 
 def test_sdk_image_runs_host_native_through_the_wrapper(workspace):
@@ -146,7 +188,7 @@ def test_sdk_image_runs_host_native_through_the_wrapper(workspace):
     cmd = builder._oe_sdk_command(build, workspace / 'cross_install', [])
 
     assert '--platform' not in cmd
-    script = cmd[-1]
+    script = _script(cmd)
     assert script.count('. /opt/sdk/') == 2
     assert f'export CMAKE_TOOLCHAIN_FILE=/workspace/cross_build/{WRAPPER_NAME}' in script
     assert '--cmake-args' not in script
@@ -157,11 +199,11 @@ def test_sdk_image_without_ros_sdk_env_fails_loudly(workspace):
     builder = _builder()
     builder._apply_labels(OE_SDK_IMAGE)
     (workspace / 'cross_build').mkdir()
-    script = builder._oe_sdk_command(
-        workspace / 'cross_build', workspace / 'cross_install', [])[-1]
+    script = _script(builder._oe_sdk_command(
+        workspace / 'cross_build', workspace / 'cross_install', []))
     assert '[ -z "$OE_CMAKE_TOOLCHAIN_FILE" ]' in script
     assert 'exit 1' in script
-    assert 'nativesdk-ros-sdk-env' in script
+    assert '--toolchain' in script
 
 
 # --- sdk backend --------------------------------------------------------------
@@ -213,7 +255,7 @@ def test_colcon_logs_land_in_the_mounted_build_base(workspace, sdk_image):
         builder._apply_labels(OE_SDK_IMAGE)
     (workspace / 'cross_build').mkdir()
     command = builder._oe_sdk_command if sdk_image else builder._native_command
-    script = command(workspace / 'cross_build', workspace / 'cross_install', [])[-1]
+    script = _script(command(workspace / 'cross_build', workspace / 'cross_install', []))
     assert 'colcon --log-base /workspace/cross_build/log build' in script
 
 
@@ -221,8 +263,8 @@ def test_sdk_builds_use_ninja_only_when_available_and_unchosen(workspace):
     builder = _builder()
     builder._apply_labels(OE_SDK_IMAGE)
     (workspace / 'cross_build').mkdir()
-    script = builder._oe_sdk_command(
-        workspace / 'cross_build', workspace / 'cross_install', [])[-1]
+    script = _script(builder._oe_sdk_command(
+        workspace / 'cross_build', workspace / 'cross_install', []))
     assert ('if [ -z "${CMAKE_GENERATOR:-}" ] && command -v ninja >/dev/null; then '
             'export CMAKE_GENERATOR=Ninja; fi') in script
 
@@ -237,7 +279,7 @@ def test_toolchain_replaces_the_sdk_toolchain_in_a_cross_sdk_image(workspace):
     build = workspace / 'cross_build'
     build.mkdir()
 
-    script = builder._oe_sdk_command(build, workspace / 'cross_install', [])[-1]
+    script = _script(builder._oe_sdk_command(build, workspace / 'cross_install', []))
 
     assert (build / WRAPPER_NAME).read_text() == wrapper_text(
         '/workspace/cross_install', '/opt/sdk/my-toolchain.cmake')

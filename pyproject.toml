@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "colcon-buildx"
 dynamic = ["version"]
-description = "A colcon verb that cross-builds ROS 2 workspaces for arm64 and armhf boards, inside a Docker image or against a Yocto/OE SDK"
+description = "A colcon verb that cross-builds ROS 2 workspaces for OEROS/Yocto images and armhf/arm64 boards, without emulation"
 readme = "README.md"
 # setuptools 77, needed for the licence metadata below, runs on Python 3.9+.
 requires-python = ">=3.9"
@@ -72,6 +72,10 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["colcon_buildx*"]
+
+# The recipes colcon-buildx builds its images from: shell, CMake and Dockerfiles.
+[tool.setuptools.package-data]
+"colcon_buildx.docker" = ["recipes/*", "recipes/cross/*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "colcon_buildx.__version__"}

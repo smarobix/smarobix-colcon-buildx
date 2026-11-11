@@ -579,7 +579,7 @@ def sync_packages_from_device(
     try:
         # Run sync script in container (don't use --rm so we can commit)
         # Show filtered progress output
-        print("📦 Installing synchronized packages (this may take a while with QEMU)...")
+        print("📦 Installing synchronized packages...")
 
         process = subprocess.Popen(
             [
