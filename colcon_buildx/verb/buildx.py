@@ -49,11 +49,6 @@ CONFIG_KEYS = frozenset(DEFAULTS) | {
     'deploy_target',
 }
 
-# One-off actions that replace the build and then exit. They are flags only: a
-# config file carrying one would turn every build in that workspace into a
-# device sync, which is why they are called out rather than merely ignored.
-ACTION_FLAGS = ('sync_from_device', 'install_deps_on_device')
-
 # Shown after the options in --help. colcon keeps its line breaks, so it is
 # wrapped by hand; the names and numbers come from the code it describes.
 EPILOG = f"""\
@@ -182,8 +177,7 @@ class BuildxVerb(VerbExtensionPoint):
                  'fixes); a board image of another architecture becomes the sysroot '
                  'of a cross image built once for this host. Nothing runs under '
                  'emulation. If a local <tag>-synced-YYYYMMDD copy of it exists, made '
-                 'by --sync-from-device or --install-deps, the newest one is used '
-                 'instead'
+                 'by --install-deps, the newest one is used instead'
         )
         docker_group.add_argument(
             '--docker-platform',
@@ -200,15 +194,6 @@ class BuildxVerb(VerbExtensionPoint):
             default=None,
             help='Build in --docker-image itself, even if a local -synced- copy '
                  'of it exists'
-        )
-        docker_group.add_argument(
-            '--sync-from-device',
-            metavar='SSH_TARGET',
-            help="Read the board's installed Debian packages over SSH, install "
-                 'the same versions into a copy of --docker-image, tag it '
-                 '<tag>-synced-YYYYMMDD, and exit without building. '
-                 'E.g. ubuntu@10.42.0.3. Only for an image of this host\'s '
-                 'architecture, as it runs the image\'s apt; not for SDK images'
         )
 
         sdk_group = parser.add_argument_group('SDK options (--method sdk)')
@@ -258,28 +243,21 @@ class BuildxVerb(VerbExtensionPoint):
             default=None,
             help='Run rosdep install for the workspace before building. '
                  '--method docker: installs into a new local image, '
-                 '<tag>-synced-YYYYMMDD, and not on the board; only for an image '
-                 'of this host\'s architecture. '
+                 '<tag>-synced-YYYYMMDD, not on the board, so the versions may '
+                 'differ from what the board has; only for an image of this '
+                 'host\'s architecture, and not for SDK images. '
                  '--method sysroot: installs on the board (--sysroot-host) over '
                  'SSH. --method sdk: ignored, as the SDK sysroot is fixed when '
-                 'the SDK is built. To install on the board and match the image '
-                 'to it, use --install-deps-on-device, then --sync-from-device'
+                 'the SDK is built'
         )
         deps_group.add_argument(
             '--rosdep-args',
             metavar='ARGS',
             default=None,
-            help='Arguments for rosdep install, used by --install-deps and '
-                 '--install-deps-on-device. Pass them as one word, e.g. '
+            help='Arguments for rosdep install, used by --install-deps. Pass '
+                 'them as one word, e.g. '
                  '--rosdep-args="--ignore-src -y -r" '
                  f"(default: {DEFAULTS['rosdep_args']})"
-        )
-        deps_group.add_argument(
-            '--install-deps-on-device',
-            metavar='SSH_TARGET',
-            help='Copy src/ to the board, run rosdep install there over SSH, '
-                 'and exit without building. sudo on the board may ask for a '
-                 'password. Works with any --method. E.g. ubuntu@10.42.0.3'
         )
 
         deploy_group = parser.add_argument_group('Deployment options')
@@ -323,13 +301,7 @@ class BuildxVerb(VerbExtensionPoint):
             print(f"ℹ️  Config file: {config_file}")
         unknown = merge_settings(args, config, DEFAULTS, CONFIG_KEYS)
         for key in unknown:
-            if key in ACTION_FLAGS:
-                flag = '--' + key.replace('_', '-')
-                logger.warning(
-                    f"⚠ {key} is a command-line action, not a config key; ignoring it. "
-                    f"Run `colcon buildx {flag} <user@host>` instead.")
-            else:
-                logger.warning(f"⚠ Ignoring unrecognised config key: {key}")
+            logger.warning(f"⚠ Ignoring unrecognised config key: {key}")
 
         # choices= no longer covers a value arriving from the config file.
         if args.method not in METHODS:
@@ -348,29 +320,6 @@ class BuildxVerb(VerbExtensionPoint):
         workspace_root = _workspace_root()
 
         try:
-            # Handle --install-deps-on-device (standalone operation, works with any method)
-            if args.install_deps_on_device:
-                from colcon_buildx.rosdep_manager import install_deps_sshfs
-
-                logger.info(f"📦 Installing workspace dependencies on device: {args.install_deps_on_device}")
-
-                success = install_deps_sshfs(
-                    args.install_deps_on_device,
-                    workspace_root,
-                    args.rosdep_args
-                )
-                if not success:
-                    logger.error("❌ Failed to install dependencies on device")
-                    return 1
-
-                logger.info("✅ Dependencies installed on device")
-                if args.method == 'docker':
-                    print("ℹ️  Next, match the build image to the board: "
-                          f"colcon buildx --sync-from-device {args.install_deps_on_device}")
-
-                # This is a standalone operation, exit after completion
-                return 0
-
             if args.method == 'sysroot':
                 # SSHFS-based cross-compilation
                 logger.warning(
@@ -443,29 +392,14 @@ class BuildxVerb(VerbExtensionPoint):
                     workspace_root=workspace_root
                 )
 
-                # Sync from device if requested (standalone operation)
-                if args.sync_from_device:
-                    logger.info(f"📦 Syncing packages from device: {args.sync_from_device}")
-                    synced_image = builder.create_synced_image(args.sync_from_device)
-                    if not synced_image:
-                        logger.error("❌ Failed to create synced image")
-                        return 1
-                    logger.info("✅ Package sync complete")
-                    print("ℹ️  Next, build: colcon buildx picks up the synced image by itself")
-                    # This is a standalone operation, exit after completion
-                    return 0
-
                 # Install dependencies if requested (with warning for Docker method)
                 if args.install_deps:
                     # One warning, so that the advice stays together with it.
                     logger.warning(
                         "⚠ --install-deps installs dependencies into a local copy of the "
-                        "Docker image only; the board will NOT have them.\n"
-                        "  To install them on the board and build against the same versions, "
-                        "with SSH_TARGET such as ubuntu@10.42.0.3:\n"
-                        "    1. colcon buildx --install-deps-on-device SSH_TARGET\n"
-                        "    2. colcon buildx --sync-from-device SSH_TARGET\n"
-                        "    3. colcon buildx")
+                        "Docker image only; the board will NOT have them, and the versions "
+                        "the image gets may differ from the board's. Install the same "
+                        "packages on the board, or better, add them to the board image.")
                     logger.info("📦 Installing workspace dependencies in Docker image...")
                     updated_image = builder.install_dependencies(args.rosdep_args)
                     if not updated_image:

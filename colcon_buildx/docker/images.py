@@ -15,9 +15,9 @@ given is one of three things, told apart by its labels and its architecture:
 - **An image of the host's architecture** that runs as the target: a dev
   container such as ``oeros-sdk-target`` on an arm64 host. It runs as it is,
   and is prepared as well when it is an OEROS image.
-- **An image of another architecture**, an Ubuntu image made for a board. It
-  becomes the sysroot of a *cross image*, built for the host from the same
-  Ubuntu release with its cross gcc. Copying the target's filesystem runs
+- **An image of another architecture**, an Ubuntu or Debian image made for a
+  board. It becomes the sysroot of a *cross image*, built for the host from
+  the same release with its cross gcc. Copying the target's filesystem runs
   nothing, so no emulation is involved.
 
 Derived images are tagged ``colcon-buildx:prepared-<id>-<recipes>`` and
@@ -253,15 +253,21 @@ def cross_build_args(os_release, target_platform):
         raise ImageError(
             f"No cross route for {target_platform}; colcon buildx cross-builds for "
             f"{' and '.join(CROSS_TARGETS)}.")
-    if os_release.get('ID') != 'ubuntu' or not os_release.get('VERSION_ID'):
+    os_id = os_release.get('ID')
+    if os_id == 'ubuntu' and os_release.get('VERSION_ID'):
+        host_image = f"ubuntu:{os_release['VERSION_ID']}"
+    elif os_id == 'debian' and os_release.get('VERSION_CODENAME'):
+        host_image = f"debian:{os_release['VERSION_CODENAME']}"
+    else:
         name = os_release.get('PRETTY_NAME') or 'an unknown distribution'
         raise ImageError(
-            f"The image is {name}. colcon buildx builds a cross image from Ubuntu board images "
-            "only, from the same release's cross gcc. For a Yocto/OEROS target, use its SDK image.")
+            f"The image is {name}. colcon buildx builds a cross image from Ubuntu and Debian "
+            "board images only, from the same release's cross gcc. For a Yocto/OEROS target, "
+            "use its SDK image.")
     triplet, processor = CROSS_TARGETS[target_platform]
     return {
         'TARGET_PLATFORM': target_platform,
-        'HOST_IMAGE': f"ubuntu:{os_release['VERSION_ID']}",
+        'HOST_IMAGE': host_image,
         'TRIPLET': triplet,
         'PROCESSOR': processor,
     }

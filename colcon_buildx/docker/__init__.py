@@ -180,16 +180,14 @@ class DockerBuilder:
 
         # No synced image found
         print(f"ℹ️  Using base image: {self.base_image}")
-        logger.info("ℹ️  Run --sync-from-device <target> to create synced version")
         return self.base_image
 
     def _refuse_foreign(self, image, action):
         """
         Return an error message if *image* would have to run under emulation, else None.
 
-        --install-deps and --sync-from-device install packages by running the
-        image's own apt, which an image of another architecture can only do
-        under emulation. colcon buildx does not emulate.
+        --install-deps installs packages by running the image's own apt, which
+        an image of another architecture can only do under emulation. colcon buildx does not emulate.
         """
         inspected = self._inspect(image)
         if inspected is None:
@@ -201,45 +199,6 @@ class DockerBuilder:
         return (f"{action} runs the image's own apt, and {image} is {arch} while this host is "
                 f"{host}; colcon buildx does not run images under emulation. Run it on an {arch} "
                 "host, or add the packages to the image where the image is built.")
-
-    def create_synced_image(self, ssh_target):
-        """
-        Create a synced version of the base image from target device.
-
-        Args:
-            ssh_target: SSH connection string (e.g., 'ubuntu@10.42.0.3')
-
-        Returns:
-            New synced image tag, or None if sync failed
-        """
-        from colcon_buildx.package_sync import sync_packages_from_device
-
-        if self._is_cross_sdk(self.base_image):
-            logger.error(
-                f"❌ {self.base_image} is a cross SDK image: it runs on the host, so its "
-                "packages are not the target's and cannot be synced to a board.")
-            logger.error(
-                "💡 The target's libraries come from the SDK's sysroot, which is fixed "
-                "when the SDK is built.")
-            return None
-        refusal = self._refuse_foreign(self.base_image, '--sync-from-device')
-        if refusal:
-            logger.error(f"❌ {refusal}")
-            return None
-
-        manifest_path = self.workspace_root / '.buildx-sync-manifest.json'
-
-        try:
-            synced_tag = sync_packages_from_device(
-                self.base_image,
-                ssh_target,
-                manifest_path,
-                platform=self.platform
-            )
-            return synced_tag
-        except Exception as e:
-            logger.error(f"❌ Failed to sync packages: {e}")
-            return None
 
     def install_dependencies(self, rosdep_args='--ignore-src -y'):
         """

@@ -64,9 +64,14 @@ def test_cross_build_args_follow_the_targets_release():
         'TRIPLET': 'arm-linux-gnueabihf', 'PROCESSOR': 'armv7l'}
 
 
+def test_cross_build_args_take_a_debian_release_by_its_codename():
+    os_release = images.parse_os_release('ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n')
+    assert images.cross_build_args(os_release, 'linux/arm/v7')['HOST_IMAGE'] == 'debian:trixie'
+
+
 def test_cross_build_args_refuse_other_distributions():
-    with pytest.raises(images.ImageError, match='Ubuntu board images only'):
-        images.cross_build_args({'ID': 'debian', 'PRETTY_NAME': 'Raspbian'}, 'linux/arm/v7')
+    with pytest.raises(images.ImageError, match='Ubuntu and Debian board images only'):
+        images.cross_build_args({'ID': 'raspbian', 'PRETTY_NAME': 'Raspbian'}, 'linux/arm/v7')
 
 
 def test_facts_fill_the_env_script():

@@ -312,15 +312,6 @@ def test_synced_image_must_come_from_the_same_repository(workspace, monkeypatch)
     assert builder.image == base
 
 
-def test_cross_sdk_image_cannot_be_synced_from_a_device(workspace, monkeypatch):
-    from colcon_buildx import package_sync
-
-    monkeypatch.setattr(docker.DockerBuilder, '_inspect', lambda self, image=None: OE_SDK_IMAGE)
-    monkeypatch.setattr(package_sync, 'sync_packages_from_device',
-                        lambda *a, **k: pytest.fail('synced a cross SDK image'))
-    assert _builder().create_synced_image('ubuntu@10.42.0.3') is None
-
-
 def test_install_deps_leaves_a_cross_sdk_image_alone(workspace, monkeypatch):
     from colcon_buildx import rosdep_manager
 

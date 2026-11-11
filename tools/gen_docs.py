@@ -55,7 +55,7 @@ source as `colcon buildx --help`. Any argument not listed here is passed on to
   container made from `docker_image`, with `src/` mounted read-only and the
   container running as your user. Nothing runs under emulation: the
   container is always the host's own architecture. What colcon-buildx makes
-  of the image depends on its [labels](labels.md) and architecture:
+  of the image depends on its [labels](oeros.md#your-own-image) and architecture:
   an SDK image (the OEROS `oeros-sdk-cross` images, or one labelled
   `oe-sdk`) is *prepared* once, with a shell, an environment script and the
   fixes it needs, and builds through the toolchain wrapper and Ninja; an
@@ -101,8 +101,7 @@ the current one that holds `src/`. Add the ones you use to `.gitignore`.
 | `cross_build/` | Every build: colcon's build tree, the toolchain wrapper, and with the Docker method colcon's logs. |
 | `cross_install/` | Every build. What `--deploy` copies to the board. |
 | `log/` | Builds with `--method sdk` or `--method sysroot`, which leave colcon's logs in its usual place. |
-| `.buildx-sync-manifest.json` | `--sync-from-device`, and `--install-deps` with the Docker method. |
-| `cross_log/sync-packages-*.log` | `--sync-from-device`, when there was something to change. |
+| `.buildx-sync-manifest.json` | `--install-deps` with the Docker method. |
 | `.buildx/mixin/` | `--emit-mixin` with `--method sdk`. |
 '''
 

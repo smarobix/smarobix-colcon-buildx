@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # A cross image: the host's architecture, the target image's filesystem as /sysroot, and the same
-# Ubuntu release's cross gcc. Copying from a foreign-platform stage executes nothing, so nothing
+# Ubuntu or Debian release's cross gcc. Copying from a foreign-platform stage executes nothing, so nothing
 # runs under emulation. Compiler, glibc and libstdc++ match the board by construction. The ROS
 # generators are pure Python and run on the host's Python, the same version as the target's; the
 # target's sysconfig data makes that interpreter report the target's ABI. colcon-buildx builds this
@@ -19,18 +19,24 @@ ARG TRIPLET=aarch64-linux-gnu
 ARG PROCESSOR=aarch64
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Cross compiler and build tools for the host; colcon from the ROS repository, the generators'
-# Python dependencies from the release itself, so the same versions as on the target.
+# Cross compiler and build tools for the host, the generators' Python dependencies from the release
+# itself, so the same versions as on the target. Ubuntu: colcon from the ROS repository. Debian has
+# no ROS repository: colcon and empy from PyPI, as this project's Debian board images do.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
- && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc \
-      | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
- && . /etc/os-release \
- && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu ${VERSION_CODENAME} main" \
-      > /etc/apt/sources.list.d/ros2.list \
- && apt-get update && apt-get install -y --no-install-recommends \
       gcc-${TRIPLET} g++-${TRIPLET} cmake make ninja-build pkg-config file \
-      python3 python3-numpy python3-empy python3-lark python3-yaml python3-setuptools \
-      python3-colcon-common-extensions \
+      python3 python3-numpy python3-yaml python3-setuptools \
+ && . /etc/os-release \
+ && if [ "$ID" = ubuntu ]; then \
+      curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc \
+        | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
+      && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu ${VERSION_CODENAME} main" \
+        > /etc/apt/sources.list.d/ros2.list \
+      && apt-get update && apt-get install -y --no-install-recommends \
+        python3-empy python3-lark python3-colcon-common-extensions; \
+    else \
+      apt-get install -y --no-install-recommends python3-pip \
+      && pip install --no-cache-dir --break-system-packages colcon-common-extensions lark "empy==3.3.4"; \
+    fi \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=target / /sysroot/
@@ -62,7 +68,7 @@ RUN for d in /usr/lib/${TRIPLET} /usr/include/${TRIPLET} /opt/ros /usr/lib; do \
  && printf 'export ROS_DISTRO=%s BUILDX_SYSROOT=/sysroot BUILDX_TRIPLET=%s BUILDX_PROCESSOR=%s\n' \
       "$distro" "${TRIPLET}" "${PROCESSOR}" > /opt/buildx/facts.sh
 # FindPython does not ask the interpreter when cross-compiling; it runs <triplet>-pythonX.Y-config,
-# which Ubuntu ships as a shell script that resolves its own location, so it reports sysroot paths.
+# which Ubuntu and Debian ship as a shell script that resolves its own location, so it reports sysroot paths.
 
 COPY toolchain.cmake env.sh /opt/buildx/
 LABEL org.smarobix.buildx.kind="sysroot-cross" \
