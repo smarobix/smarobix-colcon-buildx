@@ -6,8 +6,8 @@
 An OE/Yocto SDK ships a stock CMake toolchain file that is fine for building a
 single library against the target sysroot, but not for a colcon workspace of
 interdependent ROS packages. Rather than replace it, both the containerised
-and the host SDK paths wrap it: include the SDK's own file, then correct the
-three things that stop a ROS workspace from configuring.
+and the host SDK paths wrap it: include the SDK's own file, then correct
+what stops a ROS workspace from configuring and building for the target.
 
 The wrapper refers to the environment ($ENV{...}) rather than baking in paths
 where it can, so the same text works inside a container and on the host, and a
@@ -44,6 +44,38 @@ set(CMAKE_FIND_ROOT_PATH ${_buildx_roots} "%(install_dir)s")
 if(DEFINED ENV{AMENT_PREFIX_PATH})
   string(REPLACE ":" ";" _buildx_ament "$ENV{AMENT_PREFIX_PATH}")
   list(APPEND CMAKE_PREFIX_PATH ${_buildx_ament})
+endif()
+
+# 4. Programs run on the build host. An SDK whose sysroot carries the target's
+#    own cmake, make or ninja (the OEROS Lyrical SDKs do) otherwise hands CMake
+#    an aarch64 ninja, which the host cannot execute.
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+
+# 5. FindPython takes Python's include directory from the interpreter it runs,
+#    the SDK's own, whose sysroot has no headers. Python.h is in the target's.
+if(NOT DEFINED Python3_INCLUDE_DIR)
+  set(_buildx_sysroot "${CMAKE_SYSROOT}")
+  if(NOT _buildx_sysroot AND DEFINED ENV{OECORE_TARGET_SYSROOT})
+    set(_buildx_sysroot "$ENV{OECORE_TARGET_SYSROOT}")
+  endif()
+  file(GLOB _buildx_python_include LIST_DIRECTORIES true "${_buildx_sysroot}/usr/include/python3.*")
+  list(LENGTH _buildx_python_include _buildx_n)
+  if(_buildx_n EQUAL 1 AND EXISTS "${_buildx_python_include}/Python.h")
+    set(Python3_INCLUDE_DIR "${_buildx_python_include}" CACHE PATH "Target Python headers")
+  endif()
+endif()
+
+# 6. Compiled Python modules are named for the target's Python, not the SDK's:
+#    an x86_64 SDK would tag them cpython-3XX-x86_64-linux-gnu. ros-sdk-env, or
+#    colcon-buildx's stand-in for it, exports the target's tag; meta-ros image
+#    builds pass the same value as -DPYTHON_SOABI. pybind11 reads the suffix
+#    from PYTHON_MODULE_EXTENSION.
+if(NOT "$ENV{PYTHON_SOABI}" STREQUAL "")
+  set(PYTHON_SOABI "$ENV{PYTHON_SOABI}" CACHE STRING "Target Python ABI tag")
+  if(NOT DEFINED PYTHON_MODULE_EXTENSION)
+    set(PYTHON_MODULE_EXTENSION ".$ENV{PYTHON_SOABI}.so" CACHE STRING "Target extension suffix")
+    set(PYTHON_MODULE_DEBUG_POSTFIX "" CACHE STRING "")
+  endif()
 endif()
 '''
 

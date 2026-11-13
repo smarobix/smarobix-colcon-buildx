@@ -51,22 +51,27 @@ source as `colcon buildx --help`. Any argument not listed here is passed on to
 
 `--method`, or `method` in the config file, picks how the build runs.
 
-- **`docker`**, the default. Runs `colcon build --merge-install` inside
-  `docker_image`, with `src/` mounted read-only and the container running as
-  your user. An image that runs *as* the board is started with `--platform
-  docker_platform`, natively or under QEMU; a cross SDK image, recognised by
-  its [labels](labels.md), is started without `--platform`, has its SDK
-  environment sourced, and builds with the toolchain wrapper and Ninja.
+- **`docker`**, the default. Runs `colcon build --merge-install` in a
+  container made from `docker_image`, with `src/` mounted read-only and the
+  container running as your user. Nothing runs under emulation: the
+  container is always the host's own architecture. What colcon-buildx makes
+  of the image depends on its [labels](oeros.md#your-own-image) and architecture:
+  an SDK image (the OEROS `oeros-sdk-cross` images, or one labelled
+  `oe-sdk`) is *prepared* once, with a shell, an environment script and the
+  fixes it needs, and builds through the toolchain wrapper and Ninja; an
+  image of the host's architecture runs as it is (an OEROS one is prepared
+  too); a board image of another architecture becomes the sysroot of a
+  *cross image*, built once from the same Ubuntu release with its cross gcc.
 - **`sdk`**. Builds on this Linux host against a Yocto/OE SDK installed here,
   named by `--sdk-env`, with the same toolchain wrapper. `--emit-mixin` also
   writes the settings as a colcon mixin, so a plain `colcon build --mixin
   buildx` can use them after `colcon mixin add buildx
   file://$PWD/.buildx/mixin/index.yaml`.
-- **`sysroot`**, experimental. Mounts the board's root filesystem over SSHFS
+- **`sysroot`**, deprecated. Mounts the board's root filesystem over SSHFS
   and cross-compiles against it on this Linux host, with a CMake toolchain
-  file you supply for your aarch64 cross compiler. It needs `--sysroot-host`
-  and `--toolchain`, and `user_allow_other` in `/etc/fuse.conf`. aarch64
-  boards only, and no Python message bindings.
+  file you supply for your aarch64 cross compiler. A board image with
+  `--method docker` does the same without SSHFS; a board's own root
+  filesystem can be turned into one with `tar` and `docker import`.
 
 ## Config files
 
@@ -96,8 +101,7 @@ the current one that holds `src/`. Add the ones you use to `.gitignore`.
 | `cross_build/` | Every build: colcon's build tree, the toolchain wrapper, and with the Docker method colcon's logs. |
 | `cross_install/` | Every build. What `--deploy` copies to the board. |
 | `log/` | Builds with `--method sdk` or `--method sysroot`, which leave colcon's logs in its usual place. |
-| `.buildx-sync-manifest.json` | `--sync-from-device`, and `--install-deps` with the Docker method. |
-| `cross_log/sync-packages-*.log` | `--sync-from-device`, when there was something to change. |
+| `.buildx-sync-manifest.json` | `--install-deps` with the Docker method. |
 | `.buildx/mixin/` | `--emit-mixin` with `--method sdk`. |
 '''
 

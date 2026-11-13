@@ -1,6 +1,8 @@
-# smarobix-colcon-buildx
+# colcon buildx
 
-`colcon buildx` is a colcon verb that cross-builds a ROS 2 workspace for arm64 and armhf boards, inside a Docker image made for the board or against a Yocto/OpenEmbedded SDK, and copies the result to the board. The images come from [smarobix-buildx-images](https://github.com/smarobix/smarobix-buildx-images), which also puts ROS 2 on boards that have no official packages. The documentation for both is one site: <https://smarobix.github.io/smarobix-buildx-images/>.
+`colcon buildx` builds a ROS 2 workspace on your computer for the robot or board it will run on, and copies the result there. You name the robot's image in a two-line config file. The build runs on your computer's own architecture: nothing runs under emulation, and nothing needs installing except Docker.
+
+[OEROS](https://github.com/oerosproject) is a reference distribution for ROS 2 robots, built with Yocto and meta-ros. Besides the robot's image, it publishes a stack of container images, among them SDK images that build software for the robot. colcon buildx uses those SDK images to build your workspace for a robot that runs OEROS.
 
 ## Install
 
@@ -10,41 +12,42 @@ pip install "git+https://github.com/smarobix/smarobix-colcon-buildx.git"
 colcon buildx --help
 ```
 
-You also need Docker. On an x86_64 host, register QEMU once with `docker run --rm --privileged multiarch/qemu-user-static --reset -p yes`.
+You also need Docker.
 
 ## Quick start
 
-For a Kria K26 running Ubuntu 24.04 and ROS 2 Jazzy, create `.buildx.conf` in the workspace root, the directory that holds `src/`:
+In the workspace root, the directory that holds `src/`, create `.buildx.conf`:
 
 ```ini
 method = docker
-docker_image = ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy
-docker_platform = linux/arm64
-deploy_target = ubuntu@10.42.0.3:~/ros2_ws/install/
+docker_image = ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64
 ```
 
-Then `colcon buildx`. It runs `colcon build` inside the image and writes the result to `cross_build/` and `cross_install/`, next to `src/`, owned by you. Arguments it does not know, such as `--packages-select my_pkg`, go to `colcon build`. `colcon buildx --deploy` then copies `cross_install/` to the board with `rsync --delete`.
+Then run `colcon buildx`. The result for the robot is in `cross_install/`, owned by you; colcon's build tree is in `cross_build/`. Arguments that colcon buildx does not know, such as `--packages-select my_pkg`, go to `colcon build`. To copy the result to the robot, add `deploy_target = root@my-robot.local:/opt/ws/install/` and run `colcon buildx --deploy`.
 
-The [guided tutorial](https://smarobix.github.io/smarobix-buildx-images/start/setup/) covers every supported board, from an empty workspace to a node running on the board.
+That image is for an x86_64 computer and an arm64 robot. The [OEROS guide](docs/oeros.md) shows which image fits your computer and robot, and how colcon buildx works with it.
 
-## Methods
+## Boards without OEROS
 
-`--method`, or `method` in the config file, picks how the build runs. The Docker method covers two kinds of image, told apart by the image's [labels](docs/labels.md).
+For a 32-bit ARM board that keeps its vendor's image, such as PYNQ on a Pynq-Z1 or a 32-bit Raspberry Pi OS, name the board's image instead. colcon buildx copies its filesystem into a cross image for your computer and builds against it. [smarobix-buildx-images](https://github.com/smarobix/smarobix-buildx-images) publishes such images, and ROS 2 for those boards as a `.deb`. For 64-bit boards on Ubuntu or Debian, [pixi and RoboStack](https://robostack.github.io/) already cover the same ground.
 
-| Method | Image or SDK | Compiles | Host | Status |
-|---|---|---|---|---|
-| `docker` | an image that runs *as* the board, such as `k26-jazzy` | in the container, natively or under QEMU | any, with Docker | recommended |
-| `docker` | a cross SDK image, such as `k26-oesdk-jazzy` | in the container, on the host's architecture | any, with Docker | supported |
-| `sdk` | a Yocto/OE SDK installed on this host | on the host | Linux | supported |
-| `sysroot` | the board's own filesystem, mounted over SSHFS | on the host, with your toolchain file | Linux, aarch64 boards | experimental |
+## Limits
+
+- **SDK images make no Python bindings for messages.** C++ nodes on the robot can use your messages; `rclpy` and the `ros2` command line cannot. Message packages that Python must use belong in the robot's image.
+- **Board images must be Ubuntu or Debian**, because the cross compiler comes from the same release.
+- **A package that runs a program it just built** during its own build, as some code generators do, fails: that program is built for the robot and cannot run on your computer. Build such a package into the robot's image.
+- **`--install-deps` only works with an image of your computer's architecture.** It installs into a local copy of the image, not on the robot, so the versions may differ from what the robot has. Adding the dependency to the robot's image is the better fix.
+- **A board image's Docker `ENV` is not carried into its cross image**, so settings such as an `LD_LIBRARY_PATH` it sets are lost.
 
 ## Documentation
 
+The documentation site is <https://smarobix.github.io/smarobix-buildx-images/>. In this repository:
+
+- [OEROS robots](docs/oeros.md): which image to use, how colcon buildx works with it, and how to label an image of your own.
 - [Reference](docs/reference.md): every option, config key and method. Generated from the code.
 - [Troubleshooting](docs/troubleshooting.md): error messages and what to do about them.
-- [Image labels](docs/labels.md): the contract between colcon-buildx and the images it uses.
 
-These pages are served on the site under [`tool/`](https://smarobix.github.io/smarobix-buildx-images/tool/reference/). Complete config files with every key are in [`examples/`](examples/).
+Complete config files with every key are in [`examples/`](examples/).
 
 ## Development
 
@@ -55,9 +58,11 @@ pip install -e ".[test]"
 pytest -q && flake8
 ```
 
-The tests need no Docker, SDK or board. To add an option: declare it in `BuildxVerb.add_arguments` with `default=None`, put its default in `DEFAULTS` or its name in `CONFIG_KEYS` (or in `ACTION_FLAGS` for a one-off device action), add it to both files in `examples/`, and regenerate the reference with `python tools/gen_docs.py`. CI checks that the generated page is current and that the relative links in `README.md` and `docs/` resolve (`python tools/check_links.py`).
+The tests need no Docker, SDK or board. To add an option: declare it in `BuildxVerb.add_arguments` with `default=None`, put its default in `DEFAULTS` or its name in `CONFIG_KEYS`, add it to both files in `examples/`, and regenerate the reference with `python tools/gen_docs.py`. CI checks that the generated page is current and that the relative links in `README.md` and `docs/` resolve (`python tools/check_links.py`).
 
-Pages in `docs/` are also copied into the images site, so they use plain CommonMark, relative links between themselves, and absolute URLs to anything else.
+The images colcon buildx derives are built from the recipes in [`colcon_buildx/docker/recipes/`](colcon_buildx/docker/recipes/); their tags include a hash of the recipes, so a change to a recipe rebuilds them. The diagrams in `docs/img/` come from `tools/gen_diagrams.py`.
+
+Pages in `docs/` are also copied into the documentation site, so they use plain CommonMark, relative links between themselves, and absolute URLs to anything else.
 
 Every source file carries an SPDX header (`Apache-2.0`, `SMAROBIX GmbH`); files that cannot are covered by `REUSE.toml`, and `reuse lint` runs in CI.
 

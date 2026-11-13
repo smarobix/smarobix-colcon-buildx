@@ -2,7 +2,7 @@
 
 # colcon buildx reference
 
-`colcon buildx`: Cross-compile a ROS 2 workspace for arm64 and armhf boards.
+`colcon buildx`: Cross-compile a ROS 2 workspace for OEROS/Yocto images and arm64/armhf boards.
 
 Every option of `colcon buildx`, generated from its argument parser: the same
 source as `colcon buildx --help`. Any argument not listed here is passed on to
@@ -12,22 +12,27 @@ source as `colcon buildx --help`. Any argument not listed here is passed on to
 
 `--method`, or `method` in the config file, picks how the build runs.
 
-- **`docker`**, the default. Runs `colcon build --merge-install` inside
-  `docker_image`, with `src/` mounted read-only and the container running as
-  your user. An image that runs *as* the board is started with `--platform
-  docker_platform`, natively or under QEMU; a cross SDK image, recognised by
-  its [labels](labels.md), is started without `--platform`, has its SDK
-  environment sourced, and builds with the toolchain wrapper and Ninja.
+- **`docker`**, the default. Runs `colcon build --merge-install` in a
+  container made from `docker_image`, with `src/` mounted read-only and the
+  container running as your user. Nothing runs under emulation: the
+  container is always the host's own architecture. What colcon-buildx makes
+  of the image depends on its [labels](oeros.md#your-own-image) and architecture:
+  an SDK image (the OEROS `oeros-sdk-cross` images, or one labelled
+  `oe-sdk`) is *prepared* once, with a shell, an environment script and the
+  fixes it needs, and builds through the toolchain wrapper and Ninja; an
+  image of the host's architecture runs as it is (an OEROS one is prepared
+  too); a board image of another architecture becomes the sysroot of a
+  *cross image*, built once from the same Ubuntu release with its cross gcc.
 - **`sdk`**. Builds on this Linux host against a Yocto/OE SDK installed here,
   named by `--sdk-env`, with the same toolchain wrapper. `--emit-mixin` also
   writes the settings as a colcon mixin, so a plain `colcon build --mixin
   buildx` can use them after `colcon mixin add buildx
   file://$PWD/.buildx/mixin/index.yaml`.
-- **`sysroot`**, experimental. Mounts the board's root filesystem over SSHFS
+- **`sysroot`**, deprecated. Mounts the board's root filesystem over SSHFS
   and cross-compiles against it on this Linux host, with a CMake toolchain
-  file you supply for your aarch64 cross compiler. It needs `--sysroot-host`
-  and `--toolchain`, and `user_allow_other` in `/etc/fuse.conf`. aarch64
-  boards only, and no Python message bindings.
+  file you supply for your aarch64 cross compiler. A board image with
+  `--method docker` does the same without SSHFS; a board's own root
+  filesystem can be turned into one with `tar` and `docker import`.
 
 ## Config files
 
@@ -70,11 +75,10 @@ The Key column is the config-file key; an option without one can only be given o
 usage: colcon buildx [-h] [--method {docker,sysroot,sdk}] [--config FILE]
                      [--build-base DIR] [--install-base DIR] [--toolchain FILE]
                      [--docker-image IMAGE] [--docker-platform PLATFORM]
-                     [--use-base-image] [--sync-from-device SSH_TARGET]
-                     [--sdk-env SCRIPTS] [--emit-mixin] [--sysroot-host HOST]
-                     [--sysroot-mount DIR] [--no-mount] [--install-deps]
-                     [--rosdep-args ARGS] [--install-deps-on-device SSH_TARGET]
-                     [--deploy] [--deploy-target TARGET] [colcon_args ...]
+                     [--use-base-image] [--sdk-env SCRIPTS] [--emit-mixin]
+                     [--sysroot-host HOST] [--sysroot-mount DIR] [--no-mount]
+                     [--install-deps] [--rosdep-args ARGS] [--deploy]
+                     [--deploy-target TARGET] [colcon_args ...]
 ```
 
 ### Positional arguments
@@ -87,7 +91,7 @@ usage: colcon buildx [-h] [--method {docker,sysroot,sdk}] [--config FILE]
 
 | Option | Key | Default | Description |
 |---|---|---|---|
-| `--method {docker,sysroot,sdk}` | `method` | `docker` | How to build: docker builds in a container image; sdk builds against a Yocto/OE SDK installed on this Linux host; sysroot builds against the board's root filesystem mounted over SSHFS (experimental). Default: docker |
+| `--method {docker,sysroot,sdk}` | `method` | `docker` | How to build: docker builds in a container made from an image (an SDK image such as the OEROS ones, or a board image); sdk builds against a Yocto/OE SDK installed on this Linux host; sysroot builds against the board's root filesystem mounted over SSHFS (deprecated). Default: docker |
 | `--config FILE` |  | unset | Read settings from FILE instead of searching for a config file; see the Notes below |
 | `--build-base DIR` | `build_base` | `cross_build` | Build directory, relative to the workspace root (default: cross_build) |
 | `--install-base DIR` | `install_base` | `cross_install` | Install directory, relative to the workspace root; --deploy copies it to the board (default: cross_install) |
@@ -97,10 +101,9 @@ usage: colcon buildx [-h] [--method {docker,sysroot,sdk}] [--config FILE]
 
 | Option | Key | Default | Description |
 |---|---|---|---|
-| `--docker-image IMAGE` | `docker_image` | unset | Image to build in; required for --method docker, e.g. ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy. If a local &lt;tag&gt;-synced-YYYYMMDD copy of it exists, made by --sync-from-device or --install-deps, the newest one is used instead |
-| `--docker-platform PLATFORM` | `docker_platform` | `linux/arm64` | Docker platform of the target, which the image runs as: linux/arm64, or linux/arm/v7 for armhf boards. Also used by --sync-from-device and --install-deps. Cross SDK images ignore it and run on the host architecture (default: linux/arm64) |
+| `--docker-image IMAGE` | `docker_image` | unset | Image to build with; required for --method docker, e.g. ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64. An SDK image runs on this host and is prepared once (a shell, its environment, fixes); a board image of another architecture becomes the sysroot of a cross image built once for this host. Nothing runs under emulation. If a local &lt;tag&gt;-synced-YYYYMMDD copy of it exists, made by --install-deps, the newest one is used instead |
+| `--docker-platform PLATFORM` | `docker_platform` | `linux/arm64` | Platform of the target: linux/arm64, or linux/arm/v7 for armhf boards. Picks the variant to pull of a board image published for several platforms. SDK images ignore it (default: linux/arm64) |
 | `--use-base-image` | `use_base_image` | `false` | Build in --docker-image itself, even if a local -synced- copy of it exists |
-| `--sync-from-device SSH_TARGET` |  | unset | Read the board's installed Debian packages over SSH, install the same versions into a copy of --docker-image, tag it &lt;tag&gt;-synced-YYYYMMDD, and exit without building. E.g. ubuntu@10.42.0.3. Not for cross SDK images |
 
 ### SDK options (--method sdk)
 
@@ -109,7 +112,7 @@ usage: colcon buildx [-h] [--method {docker,sysroot,sdk}] [--config FILE]
 | `--sdk-env SCRIPTS` | `sdk_env` | unset | SDK environment script to source; several are separated by colons and sourced in order. Required for --method sdk, e.g. /opt/ros-sdk/environment-setup-cortexa72-cortexa53-oe-linux |
 | `--emit-mixin` | `emit_mixin` | `false` | Also write a colcon mixin with the SDK cross-build settings to .buildx/mixin/ in the workspace, for a plain `colcon build --mixin buildx` |
 
-### SSHFS sysroot options (--method sysroot, experimental)
+### SSHFS sysroot options (--method sysroot, deprecated)
 
 | Option | Key | Default | Description |
 |---|---|---|---|
@@ -121,9 +124,8 @@ usage: colcon buildx [-h] [--method {docker,sysroot,sdk}] [--config FILE]
 
 | Option | Key | Default | Description |
 |---|---|---|---|
-| `--install-deps` | `install_deps` | `false` | Run rosdep install for the workspace before building. --method docker: installs into a new local image, &lt;tag&gt;-synced-YYYYMMDD, and not on the board. --method sysroot: installs on the board (--sysroot-host) over SSH. --method sdk: ignored, as the SDK sysroot is fixed when the SDK is built. To install on the board and match the image to it, use --install-deps-on-device, then --sync-from-device |
-| `--rosdep-args ARGS` | `rosdep_args` | `--ignore-src -y` | Arguments for rosdep install, used by --install-deps and --install-deps-on-device. Pass them as one word, e.g. --rosdep-args="--ignore-src -y -r" (default: --ignore-src -y) |
-| `--install-deps-on-device SSH_TARGET` |  | unset | Copy src/ to the board, run rosdep install there over SSH, and exit without building. sudo on the board may ask for a password. Works with any --method. E.g. ubuntu@10.42.0.3 |
+| `--install-deps` | `install_deps` | `false` | Run rosdep install for the workspace before building. --method docker: installs into a new local image, &lt;tag&gt;-synced-YYYYMMDD, not on the board, so the versions may differ from what the board has; only for an image of this host's architecture, and not for SDK images. --method sysroot: installs on the board (--sysroot-host) over SSH. --method sdk: ignored, as the SDK sysroot is fixed when the SDK is built |
+| `--rosdep-args ARGS` | `rosdep_args` | `--ignore-src -y` | Arguments for rosdep install, used by --install-deps. Pass them as one word, e.g. --rosdep-args="--ignore-src -y -r" (default: --ignore-src -y) |
 
 ### Deployment options
 
@@ -142,6 +144,5 @@ the current one that holds `src/`. Add the ones you use to `.gitignore`.
 | `cross_build/` | Every build: colcon's build tree, the toolchain wrapper, and with the Docker method colcon's logs. |
 | `cross_install/` | Every build. What `--deploy` copies to the board. |
 | `log/` | Builds with `--method sdk` or `--method sysroot`, which leave colcon's logs in its usual place. |
-| `.buildx-sync-manifest.json` | `--sync-from-device`, and `--install-deps` with the Docker method. |
-| `cross_log/sync-packages-*.log` | `--sync-from-device`, when there was something to change. |
+| `.buildx-sync-manifest.json` | `--install-deps` with the Docker method. |
 | `.buildx/mixin/` | `--emit-mixin` with `--method sdk`. |
