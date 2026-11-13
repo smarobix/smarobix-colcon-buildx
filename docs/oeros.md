@@ -53,6 +53,8 @@ meta-ros SDKs generate C and C++ code for messages, not Python. A message packag
 
 A system library your packages need has to be in the robot's image, so it also has to be in the SDK built from that image. OEROS images are stacked, so add it where the stack is built, as a Yocto recipe or as a layer on the published image, and pin its version. `--install-deps` does not apply to SDK images.
 
+A ROS package the image lacks can also come as source: clone it into `src/`, colcon buildx builds it with yours, and `--deploy` copies it to the robot with them. Most of ros2/examples needs `example_interfaces` this way.
+
 ## A board image
 
 OEROS's own images and how to load them are in [its documentation](https://github.com/oerosproject/meta-oeros/blob/main/docs/containers.md). For a board image to flash, the Kria K26 builds in this project use meta-ros's kas configurations; the Yocto boards guide on the [documentation site](https://smarobix.github.io/smarobix-buildx-images/guides/yocto/) has the steps.
