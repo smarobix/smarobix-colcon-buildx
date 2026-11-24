@@ -168,7 +168,6 @@ def test_example_sets_a_working_docker_build(parser, name):
     assert config == {
         'method': 'docker',
         'docker_image': 'ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64',
-        'docker_platform': 'linux/arm64',
     }
     args = parser.parse_args([])
     assert merge_settings(args, config, DEFAULTS, CONFIG_KEYS) == []
@@ -185,7 +184,9 @@ def test_example_mentions_every_config_key(parser, name, tmp_path):
 def test_commented_defaults_in_the_examples_match_the_code(tmp_path):
     config = load_config(_uncomment_settings(EXAMPLES / 'buildx.conf', tmp_path))
     for key, value in DEFAULTS.items():
-        if key != 'method':  # set to docker, then shown with its alternatives
+        # method is set to docker, then shown with its alternatives; a key that
+        # is unset by default is shown with an example value.
+        if key != 'method' and value is not None:
             assert config[key] == value, key
 
 

@@ -65,7 +65,8 @@ Any OE/Yocto SDK in a Docker image works the same way, your own builds included.
 
 | Label | Values | Effect |
 |---|---|---|
-| `org.smarobix.buildx.kind` | `oe-sdk`, or absent | `oe-sdk`: an SDK image, prepared as above. Absent: a board image (see below). |
+| `org.smarobix.buildx.kind` | `oe-sdk`, `yocto-native`, `sysroot-cross`, `ros-apt`, or absent | `oe-sdk`: an SDK image, prepared as above. `yocto-native`: a Yocto dev container, used as it is on a computer of its architecture and refused on any other. `sysroot-cross`: an image that already holds a cross compiler and the board's sysroot, used as it is; the cross images colcon buildx builds carry it. `ros-apt`, or absent: a board image (see below). |
+| `org.smarobix.buildx.toolchain` | absolute path in the image | For `sysroot-cross`: the CMake toolchain file. Default: `/opt/buildx/toolchain.cmake`. |
 | `org.smarobix.buildx.env-setup` | absolute path in the image | The SDK's `environment-setup-*` script. Optional: colcon buildx also looks under `/usr/local/*/` and `/opt/`. |
 | `org.smarobix.buildx.ros-distro` | `jazzy`, `lyrical`, … | Which `/opt/ros/<distro>` to use, ahead of a distro in the image's name. |
 | `org.smarobix.buildx.target-platform` | `linux/arm64`, `linux/arm/v7` | What the output runs on; printed at build time. |

@@ -62,7 +62,6 @@ def parse_workspace_deps(workspace_path: Path) -> Set[str]:
 def install_deps_docker(
     image: str,
     workspace_path: Path,
-    platform: str,
     rosdep_args: str = '--ignore-src -y'
 ) -> str:
     """
@@ -71,7 +70,6 @@ def install_deps_docker(
     Args:
         image: Docker image to use as base
         workspace_path: Path to workspace root
-        platform: Docker platform (e.g., linux/arm64)
         rosdep_args: Additional arguments for rosdep install
 
     Returns:
@@ -130,7 +128,7 @@ echo "Dependencies installed successfully!"
     run_cmd = [
         'docker', 'run',
         '--name', container_name,
-        *(['--platform', platform] if platform else []),
+        # No --platform: the image is the host's architecture, checked by the caller.
         '-v', f'{workspace_path}:/workspace:ro',
         image,
         'bash', '-c', install_script

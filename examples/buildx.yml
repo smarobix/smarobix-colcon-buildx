@@ -30,9 +30,10 @@ method: docker
 # under emulation; see the README for which image fits your computer and robot.
 docker_image: ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64
 
-# Target platform, to pull a board image published for several: linux/arm/v7
-# for armhf boards. SDK images ignore it.
-docker_platform: linux/arm64
+# Only for a board image published for several platforms: the board's platform,
+# linux/arm64, or linux/arm/v7 for armhf boards. Unset, the image is used as it
+# is. SDK images ignore it.
+# docker_platform: linux/arm/v7
 
 # Build with docker_image itself even if a local -synced- copy of it exists.
 # use_base_image: false

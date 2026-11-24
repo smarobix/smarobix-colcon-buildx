@@ -61,7 +61,7 @@ source as `colcon buildx --help`. Any argument not listed here is passed on to
   fixes it needs, and builds through the toolchain wrapper and Ninja; an
   image of the host's architecture runs as it is (an OEROS one is prepared
   too); a board image of another architecture becomes the sysroot of a
-  *cross image*, built once from the same Ubuntu release with its cross gcc.
+  *cross image*, built once from the same Ubuntu or Debian release with its cross gcc.
 - **`sdk`**. Builds on this Linux host against a Yocto/OE SDK installed here,
   named by `--sdk-env`, with the same toolchain wrapper. `--emit-mixin` also
   writes the settings as a colcon mixin, so a plain `colcon build --mixin

@@ -320,3 +320,131 @@ def test_install_deps_leaves_a_cross_sdk_image_alone(workspace, monkeypatch):
                         lambda *a, **k: pytest.fail('ran rosdep in a cross SDK image'))
     builder = _builder()
     assert builder.install_dependencies() == builder.image
+
+
+# --- docker_platform and multi-platform board images ---------------------------
+
+class FakeDocker:
+    """
+    Docker on an *host* computer with one board image, `multi:tag`.
+
+    The registry has the image's *variants*; locally there is the host's
+    variant only, until a `docker pull --platform` fetches another.
+    """
+
+    def __init__(self, host='arm64', variants=('linux/arm64', 'linux/arm/v7'), labels=None):
+        self.host = host
+        self.variants = set(variants)
+        self.local = {f'linux/{host}'} & self.variants
+        self.labels = labels or {}
+        self.commands = []
+        self.crossed = None
+
+    def inspect(self, image, platform=None):
+        if image.startswith('colcon-buildx:cross-'):
+            return {'Architecture': self.host, 'Config': {'Labels': {
+                docker.LABEL_KIND: docker.KIND_SYSROOT_CROSS,
+                docker.LABEL_ENV_SETUP: '/opt/buildx/env.sh',
+                docker.LABEL_TOOLCHAIN: '/opt/buildx/toolchain.cmake',
+                docker.LABEL_TARGET_PLATFORM: self.crossed}}}
+        platform = platform or f'linux/{self.host}'
+        if platform not in self.local:
+            return None
+        arch = platform.split('/')[1]
+        return {'Id': f'sha256:{arch}', 'Architecture': arch,
+                'Variant': platform.split('/')[2] if platform.count('/') == 2 else '',
+                'Config': {'Labels': dict(self.labels)}}
+
+    def derive_cross(self, image, inspected):
+        self.crossed = docker.images.image_platform(inspected)
+        return 'colcon-buildx:cross-test'
+
+    def run(self, cmd, **kwargs):
+        self.commands.append(cmd)
+        if cmd[:3] == ['docker', 'pull', '--platform']:
+            if cmd[3] not in self.variants:
+                return docker.subprocess.CompletedProcess(cmd, 1)
+            self.local.add(cmd[3])
+        return docker.subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
+
+    def builds(self):
+        """The image of every `docker run` that built."""
+        return [cmd[-4] for cmd in self.commands if cmd[:2] == ['docker', 'run']]
+
+
+@pytest.fixture
+def fake_docker(monkeypatch):
+    def install(**kwargs):
+        fake = FakeDocker(**kwargs)
+        monkeypatch.setattr(docker.images, 'inspect', fake.inspect)
+        monkeypatch.setattr(docker.images, 'host_arch', lambda: fake.host)
+        monkeypatch.setattr(docker.images, 'derive_cross', fake.derive_cross)
+        monkeypatch.setattr(docker.subprocess, 'run', fake.run)
+        return fake
+    return install
+
+
+def _multi_builder(platform):
+    return docker.DockerBuilder(
+        'multi:tag', platform, 'cross_build', 'cross_install', use_base_image=True)
+
+
+def test_docker_platform_picks_the_boards_variant_of_a_multi_platform_image(
+        workspace, fake_docker):
+    # Docker pulls and runs the host's variant by default; building in it would
+    # make arm64 binaries for an armhf board.
+    fake = fake_docker()
+    assert _multi_builder('linux/arm/v7').build([]) == 0
+    assert ['docker', 'pull', '--platform', 'linux/arm/v7', 'multi:tag'] in fake.commands
+    assert fake.crossed == 'linux/arm/v7'
+    assert fake.builds() == ['colcon-buildx:cross-test']
+
+
+def test_docker_platform_of_the_hosts_architecture_builds_in_the_image(workspace, fake_docker):
+    fake = fake_docker(host='amd64', variants=('linux/amd64', 'linux/arm64'))
+    assert _multi_builder('linux/arm64').build([]) == 0
+    assert fake.crossed == 'linux/arm64'
+
+    fake = fake_docker()
+    assert _multi_builder('linux/arm64').build([]) == 0
+    assert fake.crossed is None and fake.builds() == ['multi:tag']
+
+
+def test_without_docker_platform_the_image_is_used_as_it_is(workspace, fake_docker):
+    fake = fake_docker()
+    assert _multi_builder(None).build([]) == 0
+    assert fake.crossed is None and fake.builds() == ['multi:tag']
+    assert not any(cmd[:2] == ['docker', 'pull'] for cmd in fake.commands)
+
+
+def test_an_image_without_the_platforms_variant_is_refused(workspace, fake_docker):
+    fake = fake_docker(variants=('linux/arm64',))
+    assert _multi_builder('linux/arm/v7').build([]) == 1
+    assert fake.builds() == []
+
+
+def test_an_sdk_image_ignores_docker_platform(workspace, fake_docker, monkeypatch):
+    fake = fake_docker(labels=dict(OE_SDK_IMAGE['Config']['Labels']))
+    monkeypatch.setattr(docker.images, 'prepare', lambda image, inspected, kind: image)
+    assert _multi_builder('linux/arm/v7').build([]) == 0
+    assert not any(cmd[:2] == ['docker', 'pull'] for cmd in fake.commands)
+
+
+def test_install_deps_runs_the_hosts_image_without_a_platform(workspace, fake_docker):
+    # The README's one supported case: an image of the host's architecture.
+    fake = fake_docker(host='amd64', variants=('linux/amd64', 'linux/arm64'))
+    pkg = workspace / 'src' / 'p'
+    pkg.mkdir()
+    (pkg / 'package.xml').write_text(
+        '<package format="3"><name>p</name><depend>rclcpp</depend></package>')
+    assert _multi_builder(None).install_dependencies()
+    runs = [cmd for cmd in fake.commands if cmd[:2] == ['docker', 'run']]
+    assert len(runs) == 1 and '--platform' not in runs[0]
+
+
+def test_install_deps_refuses_a_board_of_another_architecture(workspace, fake_docker):
+    # With docker_platform naming another architecture, the build uses that
+    # variant; installing into the host's variant would install into the wrong one.
+    fake = fake_docker(host='amd64', variants=('linux/amd64', 'linux/arm64'))
+    assert _multi_builder('linux/arm64').install_dependencies() is None
+    assert not any(cmd[:2] == ['docker', 'run'] for cmd in fake.commands)

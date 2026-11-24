@@ -27,7 +27,7 @@ DEFAULTS = {
     'method': 'docker',
     'build_base': 'cross_build',
     'install_base': 'cross_install',
-    'docker_platform': 'linux/arm64',
+    'docker_platform': None,
     # Kept unexpanded so --help and the docs show it as written; the sysroot
     # builder expands it.
     'sysroot_mount': '~/mnt/board-sysroot',
@@ -183,10 +183,11 @@ class BuildxVerb(VerbExtensionPoint):
             '--docker-platform',
             metavar='PLATFORM',
             default=None,
-            help='Platform of the target: linux/arm64, or linux/arm/v7 for armhf '
-                 'boards. Picks the variant to pull of a board image published for '
-                 'several platforms. SDK images ignore it '
-                 f"(default: {DEFAULTS['docker_platform']})"
+            help='Platform of the target, for a board image published for several '
+                 'platforms: linux/arm64, or linux/arm/v7 for armhf boards. The build '
+                 'uses that variant, and stops if the image has none. Unset, it uses '
+                 'the image as it is, which for such an image is the host\'s variant. '
+                 'SDK images ignore it'
         )
         docker_group.add_argument(
             '--use-base-image',

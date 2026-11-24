@@ -22,7 +22,7 @@ source as `colcon buildx --help`. Any argument not listed here is passed on to
   fixes it needs, and builds through the toolchain wrapper and Ninja; an
   image of the host's architecture runs as it is (an OEROS one is prepared
   too); a board image of another architecture becomes the sysroot of a
-  *cross image*, built once from the same Ubuntu release with its cross gcc.
+  *cross image*, built once from the same Ubuntu or Debian release with its cross gcc.
 - **`sdk`**. Builds on this Linux host against a Yocto/OE SDK installed here,
   named by `--sdk-env`, with the same toolchain wrapper. `--emit-mixin` also
   writes the settings as a colcon mixin, so a plain `colcon build --mixin
@@ -102,7 +102,7 @@ usage: colcon buildx [-h] [--method {docker,sysroot,sdk}] [--config FILE]
 | Option | Key | Default | Description |
 |---|---|---|---|
 | `--docker-image IMAGE` | `docker_image` | unset | Image to build with; required for --method docker, e.g. ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64. An SDK image runs on this host and is prepared once (a shell, its environment, fixes); a board image of another architecture becomes the sysroot of a cross image built once for this host. Nothing runs under emulation. If a local &lt;tag&gt;-synced-YYYYMMDD copy of it exists, made by --install-deps, the newest one is used instead |
-| `--docker-platform PLATFORM` | `docker_platform` | `linux/arm64` | Platform of the target: linux/arm64, or linux/arm/v7 for armhf boards. Picks the variant to pull of a board image published for several platforms. SDK images ignore it (default: linux/arm64) |
+| `--docker-platform PLATFORM` | `docker_platform` | unset | Platform of the target, for a board image published for several platforms: linux/arm64, or linux/arm/v7 for armhf boards. The build uses that variant, and stops if the image has none. Unset, it uses the image as it is, which for such an image is the host's variant. SDK images ignore it |
 | `--use-base-image` | `use_base_image` | `false` | Build in --docker-image itself, even if a local -synced- copy of it exists |
 
 ### SDK options (--method sdk)

@@ -47,7 +47,7 @@ RECIPES = Path(__file__).parent / 'recipes'
 BUSYBOX_IMAGE = 'busybox:1.37.0-musl'
 LOCAL_REPO = 'colcon-buildx'
 
-# Our own labels; docs/labels.md is the contract.
+# Our own labels, documented in docs/oeros.md ("Your own image").
 LABEL_KIND = 'org.smarobix.buildx.kind'
 LABEL_ENV_SETUP = 'org.smarobix.buildx.env-setup'
 LABEL_TOOLCHAIN = 'org.smarobix.buildx.toolchain'
@@ -104,6 +104,12 @@ def host_arch():
     return normalize_arch(out or host_platform_module.machine())
 
 
+def platform_arch(platform):
+    """Return the architecture a platform such as linux/arm/v7 names (arm), or ''."""
+    parts = (platform or '').split('/')
+    return normalize_arch(parts[1]) if len(parts) > 1 else ''
+
+
 def image_platform(inspected):
     """Return an inspected image's platform, such as linux/arm64 or linux/arm/v7."""
     arch = normalize_arch(inspected.get('Architecture'))
@@ -143,6 +149,11 @@ def is_oeros(labels):
     return any(key.startswith(OEROS_PREFIX) for key in labels)
 
 
+def is_sdk(labels):
+    """Return True for an SDK image, which runs on the host rather than as the target."""
+    return labels.get(LABEL_KIND) == KIND_OE_SDK or labels.get(OEROS_SDK) == 'cross'
+
+
 def classify(labels, arch, host):
     """
     Decide what to do with an image, from its labels and architecture.
@@ -158,7 +169,7 @@ def classify(labels, arch, host):
     if kind == KIND_SYSROOT_CROSS:
         return RUN_AS_IS, KIND_SYSROOT_CROSS
 
-    if kind == KIND_OE_SDK or labels.get(OEROS_SDK) == 'cross':
+    if is_sdk(labels):
         if arch != host:
             hint = ''
             if is_oeros(labels):
@@ -188,10 +199,11 @@ def classify(labels, arch, host):
     return CROSS, KIND_SYSROOT_CROSS
 
 
-def inspect(image):
-    """Return `docker image inspect` for *image*, or None."""
+def inspect(image, platform=None):
+    """Return `docker image inspect` for *image*, or for its *platform* variant, or None."""
     import json
-    result = subprocess.run(['docker', 'image', 'inspect', image], capture_output=True, text=True)
+    command = ['docker', 'image', 'inspect'] + (['--platform', platform] if platform else [])
+    result = subprocess.run(command + [image], capture_output=True, text=True)
     if result.returncode != 0:
         return None
     try:

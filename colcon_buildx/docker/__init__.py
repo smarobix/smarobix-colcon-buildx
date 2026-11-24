@@ -194,6 +194,9 @@ class DockerBuilder:
             return None
         arch = images.normalize_arch(inspected.get('Architecture'))
         host = images.host_arch()
+        # docker_platform naming another architecture means the build will use
+        # that variant, so the host's variant is not the one to install into.
+        arch = images.platform_arch(self.platform) or arch
         if arch == host:
             return None
         return (f"{action} runs the image's own apt, and {image} is {arch} while this host is "
@@ -212,6 +215,8 @@ class DockerBuilder:
         """
         from colcon_buildx.rosdep_manager import install_deps_docker
 
+        if not self.check_image_exists():
+            return None
         if self._is_cross_sdk(self.image):
             logger.warning(
                 f"⚠ Ignoring --install-deps: {self.image} is a cross SDK image. Its "
@@ -223,13 +228,9 @@ class DockerBuilder:
             return None
 
         try:
-            # Use current image (could be base or already synced)
-            updated_tag = install_deps_docker(
-                self.image,
-                self.workspace_root,
-                self.platform,
-                rosdep_args
-            )
+            # Use current image (could be base or already synced). It is the
+            # host's architecture by now, so it runs without --platform.
+            updated_tag = install_deps_docker(self.image, self.workspace_root, rosdep_args)
             return updated_tag
         except Exception as e:
             logger.error(f"❌ Failed to install dependencies: {e}")
@@ -260,8 +261,7 @@ class DockerBuilder:
         An image that is not local yet cannot be told apart, and is taken not to
         be one; the operation that needs it pulls it and goes ahead.
         """
-        labels = images.labels_of(self._inspect(image))
-        return labels.get(LABEL_KIND) == KIND_OE_SDK or labels.get(images.OEROS_SDK) == 'cross'
+        return images.is_sdk(images.labels_of(self._inspect(image)))
 
     def _apply_labels(self, inspected):
         """Read buildx labels off an inspected image and configure from them."""
@@ -304,6 +304,43 @@ class DockerBuilder:
         logger.info("✓ Successfully pulled image")
         return True
 
+    def _select_variant(self, inspected):
+        """
+        Return the inspected variant of a board image that docker_platform names.
+
+        A board image published for several platforms usually has one for the
+        host too, and that is the one Docker pulls and runs by default. Building
+        in it would make binaries for the host, so when docker_platform names
+        another architecture, take that variant or stop. SDK images and cross
+        images run on the host and ignore docker_platform.
+
+        Raises:
+            images.ImageError: the image has no variant for docker_platform
+        """
+        wanted = images.platform_arch(self.platform)
+        labels = images.labels_of(inspected)
+        if (not wanted or images.is_sdk(labels) or labels.get(LABEL_KIND) == KIND_SYSROOT_CROSS
+                or images.normalize_arch(inspected.get('Architecture')) == wanted):
+            return inspected
+
+        def matches(variant):
+            return (variant is not None
+                    and images.normalize_arch(variant.get('Architecture')) == wanted)
+
+        variant = images.inspect(self.image, self.platform)
+        if not matches(variant):
+            logger.info(f"📥 Pulling the {self.platform} variant of {self.image}")
+            if subprocess.run(['docker', 'pull', '--platform', self.platform,
+                               self.image]).returncode == 0:
+                variant = images.inspect(self.image, self.platform)
+        if not matches(variant):
+            have = images.image_platform(inspected)
+            raise images.ImageError(
+                f"docker_platform is {self.platform}, and {self.image} has no variant for it, "
+                f"only {have}. Leave docker_platform unset to build for {have}, or use an "
+                f"image of the board.")
+        return variant
+
     def resolve_image(self):
         """
         Turn the given image into the one the build runs in, and configure from it.
@@ -319,9 +356,10 @@ class DockerBuilder:
         if inspected is None:
             logger.error(f"❌ Cannot inspect {self.image}")
             return False
-        arch = images.normalize_arch(inspected.get('Architecture'))
         host = images.host_arch()
         try:
+            inspected = self._select_variant(inspected)
+            arch = images.normalize_arch(inspected.get('Architecture'))
             action, kind = images.classify(images.labels_of(inspected), arch, host)
             if action == images.PREPARE:
                 self.image = images.prepare(self.image, inspected, kind)
@@ -338,6 +376,10 @@ class DockerBuilder:
         if self.image != self.base_image:
             print(f"ℹ️  Building in {self.image}, made from {self.base_image}")
         print(f"   Kind: {self.kind}, target {target}, host {host}; nothing runs under emulation")
+        if not self.platform and not self.labels and images.normalize_arch(
+                inspected.get('Architecture')) == host:
+            print(f"   {self.image} is this computer's own architecture, so the build is for "
+                  f"{target}. For a board of another one, set docker_platform.")
         return True
 
     def detect_ros_distro(self):

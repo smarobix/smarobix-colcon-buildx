@@ -20,6 +20,8 @@ Each entry starts with the message you see. colcon buildx's messages come throug
 
 **`does not run images under emulation`.** The image is for another architecture than your computer, and colcon buildx will not emulate it. The message names the image to use instead: on an arm64 computer, `oeros-sdk-target` rather than `oeros-sdk-cross`; for an OEROS robot, its SDK image rather than the robot's own image. See [OEROS robots](oeros.md#pick-an-image).
 
+**`docker_platform is PLATFORM, and IMAGE has no variant for it`.** `docker_platform` picks a variant of an image published for several platforms, and this image has none for that platform. Remove `docker_platform` to build for the image's own platform, which the message names, or use the image for your board.
+
 **`Building colcon-buildx:prepared-... failed`** or **`Building colcon-buildx:cross-... failed`.** Preparing an SDK image, or building the cross image for a board image, failed; Docker's output above the message says where. Both need network access the first time: BusyBox from Docker Hub, `ament_cmake_ros` from GitHub, and the release's packages for a cross image.
 
 **`colcon buildx builds a cross image from Ubuntu and Debian board images only`.** The cross compiler comes from the board image's own release, so other distributions have none to offer. For a Yocto board, use an SDK image of its build.

@@ -35,6 +35,7 @@ For a 32-bit ARM board that keeps its vendor's image, such as PYNQ on a Pynq-Z1 
 
 - **SDK images make no Python bindings for messages.** C++ nodes on the robot can use your messages; `rclpy` and the `ros2` command line cannot. Message packages that Python must use belong in the robot's image.
 - **Board images must be Ubuntu or Debian**, because the cross compiler comes from the same release.
+- **32-bit boards need ARMv7 or newer.** The cross compiler is the release's `arm-linux-gnueabihf` gcc, which builds for ARMv7, so a Raspberry Pi 1, Zero or Zero W cannot run the result.
 - **A package that runs a program it just built** during its own build, as some code generators do, fails: that program is built for the robot and cannot run on your computer. Build such a package into the robot's image.
 - **`--install-deps` only works with an image of your computer's architecture.** It installs into a local copy of the image, not on the robot, so the versions may differ from what the robot has. Adding the dependency to the robot's image is the better fix.
 - **A board image's Docker `ENV` is not carried into its cross image**, so settings such as an `LD_LIBRARY_PATH` it sets are lost.
