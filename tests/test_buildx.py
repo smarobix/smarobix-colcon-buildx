@@ -332,13 +332,18 @@ class FakeDocker:
     variant only, until a `docker pull --platform` fetches another.
     """
 
-    def __init__(self, host='arm64', variants=('linux/arm64', 'linux/arm/v7'), labels=None):
+    def __init__(self, host='arm64', variants=('linux/arm64', 'linux/arm/v7'), labels=None,
+                 old_api=False):
         self.host = host
         self.variants = set(variants)
         self.local = {f'linux/{host}'} & self.variants
         self.labels = labels or {}
         self.commands = []
         self.crossed = None
+        # Docker before API 1.49 has no `image inspect --platform`, and its tag
+        # is whichever variant was pulled last.
+        self.old_api = old_api
+        self.current = f'linux/{host}'
 
     def inspect(self, image, platform=None):
         if image.startswith('colcon-buildx:cross-'):
@@ -347,7 +352,9 @@ class FakeDocker:
                 docker.LABEL_ENV_SETUP: '/opt/buildx/env.sh',
                 docker.LABEL_TOOLCHAIN: '/opt/buildx/toolchain.cmake',
                 docker.LABEL_TARGET_PLATFORM: self.crossed}}}
-        platform = platform or f'linux/{self.host}'
+        if platform and self.old_api:
+            return None
+        platform = platform or (self.current if self.old_api else f'linux/{self.host}')
         if platform not in self.local:
             return None
         arch = platform.split('/')[1]
@@ -365,6 +372,7 @@ class FakeDocker:
             if cmd[3] not in self.variants:
                 return docker.subprocess.CompletedProcess(cmd, 1)
             self.local.add(cmd[3])
+            self.current = cmd[3]
         return docker.subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
 
     def builds(self):
@@ -415,6 +423,21 @@ def test_without_docker_platform_the_image_is_used_as_it_is(workspace, fake_dock
     assert _multi_builder(None).build([]) == 0
     assert fake.crossed is None and fake.builds() == ['multi:tag']
     assert not any(cmd[:2] == ['docker', 'pull'] for cmd in fake.commands)
+
+
+def test_docker_platform_works_on_a_docker_without_inspect_platform(workspace, fake_docker):
+    fake = fake_docker(old_api=True)
+    assert _multi_builder('linux/arm/v7').build([]) == 0
+    assert fake.crossed == 'linux/arm/v7'
+
+
+def test_a_host_build_from_an_unknown_image_says_how_to_build_for_a_board(
+        workspace, fake_docker, capsys):
+    # The official ROS images carry OCI labels, but none of colcon buildx's.
+    fake_docker(host='amd64', variants=('linux/amd64', 'linux/arm64'),
+                labels={'org.opencontainers.image.version': '24.04'})
+    assert _multi_builder(None).build([]) == 0
+    assert 'set docker_platform' in capsys.readouterr().out
 
 
 def test_an_image_without_the_platforms_variant_is_refused(workspace, fake_docker):

@@ -20,7 +20,7 @@ Each entry starts with the message you see. colcon buildx's messages come throug
 
 **`does not run images under emulation`.** The image is for another architecture than your computer, and colcon buildx will not emulate it. The message names the image to use instead: on an arm64 computer, `oeros-sdk-target` rather than `oeros-sdk-cross`; for an OEROS robot, its SDK image rather than the robot's own image. See [OEROS robots](oeros.md#pick-an-image).
 
-**`docker_platform is PLATFORM, and IMAGE has no variant for it`.** `docker_platform` picks a variant of an image published for several platforms, and this image has none for that platform. Remove `docker_platform` to build for the image's own platform, which the message names, or use the image for your board.
+**`docker_platform is PLATFORM, and colcon buildx found no variant of IMAGE for it`.** `docker_platform` picks a variant of an image published for several platforms. Either the image has none for that platform: remove `docker_platform` to build for the image's own platform, which the message names, or use the image for your board. Or Docker is older than 28.1, which cannot look at one platform of a local image, and the image is not in a registry to pull that platform from: update Docker, or push the image.
 
 **`Building colcon-buildx:prepared-... failed`** or **`Building colcon-buildx:cross-... failed`.** Preparing an SDK image, or building the cross image for a board image, failed; Docker's output above the message says where. Both need network access the first time: BusyBox from Docker Hub, `ament_cmake_ros` from GitHub, and the release's packages for a cross image.
 

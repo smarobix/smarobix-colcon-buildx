@@ -333,12 +333,17 @@ class DockerBuilder:
             if subprocess.run(['docker', 'pull', '--platform', self.platform,
                                self.image]).returncode == 0:
                 variant = images.inspect(self.image, self.platform)
+                if not matches(variant):
+                    # Docker before 28.1 (API 1.49) cannot inspect one platform
+                    # of an image; there the tag is the variant just pulled.
+                    variant = images.inspect(self.image)
         if not matches(variant):
             have = images.image_platform(inspected)
             raise images.ImageError(
-                f"docker_platform is {self.platform}, and {self.image} has no variant for it, "
-                f"only {have}. Leave docker_platform unset to build for {have}, or use an "
-                f"image of the board.")
+                f"docker_platform is {self.platform}, and colcon buildx found no variant of "
+                f"{self.image} for it, only {have}: the image has none, or this Docker is "
+                f"older than 28.1 and the variant is not in a registry. Leave docker_platform "
+                f"unset to build for {have}, or use an image of the board.")
         return variant
 
     def resolve_image(self):
@@ -376,8 +381,9 @@ class DockerBuilder:
         if self.image != self.base_image:
             print(f"ℹ️  Building in {self.image}, made from {self.base_image}")
         print(f"   Kind: {self.kind}, target {target}, host {host}; nothing runs under emulation")
-        if not self.platform and not self.labels and images.normalize_arch(
-                inspected.get('Architecture')) == host:
+        ours = any(key.startswith(('org.smarobix.buildx.', images.OEROS_PREFIX))
+                   for key in self.labels)
+        if action == images.RUN_AS_IS and not self.platform and not ours:
             print(f"   {self.image} is this computer's own architecture, so the build is for "
                   f"{target}. For a board of another one, set docker_platform.")
         return True
