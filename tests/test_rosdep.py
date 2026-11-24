@@ -37,7 +37,7 @@ def _running_the_script(commands):
 
 
 def test_install_script_runs_exactly_once(workspace, commands):
-    rosdep_manager.install_deps_docker(IMAGE, workspace, 'linux/arm64')
+    rosdep_manager.install_deps_docker(IMAGE, workspace)
 
     runs = _running_the_script(commands)
     assert len(runs) == 1
@@ -46,17 +46,23 @@ def test_install_script_runs_exactly_once(workspace, commands):
 
 
 def test_the_container_that_ran_the_script_is_committed_and_removed(workspace, commands):
-    new_tag = rosdep_manager.install_deps_docker(IMAGE, workspace, 'linux/arm/v7')
+    new_tag = rosdep_manager.install_deps_docker(IMAGE, workspace)
 
     run = _running_the_script(commands)[0]
     name = run[run.index('--name') + 1]
-    assert run[run.index('--platform') + 1] == 'linux/arm/v7'
     assert ['docker', 'commit', name, new_tag] in commands
     assert ['docker', 'rm', '-f', name] == commands[-1]
 
 
+def test_the_image_runs_without_a_platform(workspace, commands):
+    # The caller has checked that the image is the host's architecture; a
+    # --platform here would run another variant under emulation.
+    rosdep_manager.install_deps_docker(IMAGE, workspace)
+    assert '--platform' not in _running_the_script(commands)[0]
+
+
 def test_package_lists_are_fetched_before_rosdep_installs(workspace, commands):
-    rosdep_manager.install_deps_docker(IMAGE, workspace, 'linux/arm64')
+    rosdep_manager.install_deps_docker(IMAGE, workspace)
     script = _running_the_script(commands)[0][-1]
     assert script.index('apt-get update') < script.index('rosdep install --from-paths')
 
@@ -71,6 +77,6 @@ def test_a_failed_install_is_reported_and_cleaned_up(workspace, monkeypatch):
 
     monkeypatch.setattr(rosdep_manager.subprocess, 'run', run)
     with pytest.raises(RuntimeError):
-        rosdep_manager.install_deps_docker(IMAGE, workspace, 'linux/arm64')
+        rosdep_manager.install_deps_docker(IMAGE, workspace)
     assert not any(cmd[:2] == ['docker', 'commit'] for cmd in recorded)
     assert recorded[-1][:3] == ['docker', 'rm', '-f']

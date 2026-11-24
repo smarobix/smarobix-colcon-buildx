@@ -11,7 +11,7 @@ from colcon_buildx.config import (
     find_config_file, load_config, load_conf_config, load_yaml_config,
     merge_settings,
 )
-from colcon_buildx.verb.buildx import ACTION_FLAGS, BuildxVerb, CONFIG_KEYS, DEFAULTS
+from colcon_buildx.verb.buildx import BuildxVerb, CONFIG_KEYS, DEFAULTS
 
 EXAMPLES = Path(__file__).resolve().parent.parent / 'examples'
 
@@ -145,18 +145,6 @@ def test_command_line_beats_file_beats_defaults(workspace, parser, name, text):
     assert args.install_base == DEFAULTS['install_base']   # default
 
 
-# --- one-off actions are not settings -----------------------------------------
-
-@pytest.mark.parametrize('key', ACTION_FLAGS)
-def test_action_flags_are_not_config_keys(parser, key):
-    # A config file that names one would turn every build in the workspace
-    # into a device sync that exits without building.
-    assert key not in CONFIG_KEYS
-    args = parser.parse_args([])
-    assert merge_settings(args, {key: 'ubuntu@10.42.0.3'}, DEFAULTS, CONFIG_KEYS) == [key]
-    assert getattr(args, key) is None
-
-
 # --- the shipped examples -----------------------------------------------------
 
 EXAMPLE_NAMES = ['buildx.conf', 'buildx.yml']
@@ -179,8 +167,7 @@ def test_example_sets_a_working_docker_build(parser, name):
     config = load_config(EXAMPLES / name)
     assert config == {
         'method': 'docker',
-        'docker_image': 'ghcr.io/smarobix/smarobix-buildx-images:k26-jazzy',
-        'docker_platform': 'linux/arm64',
+        'docker_image': 'ghcr.io/oerosproject/oeros-sdk-cross:lyrical-arm64',
     }
     args = parser.parse_args([])
     assert merge_settings(args, config, DEFAULTS, CONFIG_KEYS) == []
@@ -197,7 +184,9 @@ def test_example_mentions_every_config_key(parser, name, tmp_path):
 def test_commented_defaults_in_the_examples_match_the_code(tmp_path):
     config = load_config(_uncomment_settings(EXAMPLES / 'buildx.conf', tmp_path))
     for key, value in DEFAULTS.items():
-        if key != 'method':  # set to docker, then shown with its alternatives
+        # method is set to docker, then shown with its alternatives; a key that
+        # is unset by default is shown with an example value.
+        if key != 'method' and value is not None:
             assert config[key] == value, key
 
 
